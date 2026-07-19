@@ -10,7 +10,7 @@ env:
   # 源码仓库：默认拉取 wiliwili 源码（含子模块）。
   WILIWILI_REPO: https://github.com/Windstarry/wiliwili.git
   # 源码版本：默认 master。可指定 tag / commit / 分支名，例如 v1.4.0 或 a1b2c3d
-  WILIWILI_REF: master
+  WILIWILI_REF: yoga
 jobs:
   build:
     name: Build aarch64 Binary
@@ -21,14 +21,11 @@ jobs:
       - name: Clone wiliwili source (with submodules)
         run: |
           git clone --recursive "$WILIWILI_REPO" src
-          if [ "$WILIWILI_REF" != "master" ]; then
-            git -C src checkout "$WILIWILI_REF"
-            git -C src submodule update --init --recursive
-          fi
       - name: Build in container
         run: |
           docker run --rm -v "$PWD":/workspace -w /workspace \
             -e DEBIAN_FRONTEND=noninteractive -e SOURCE_DIR=/workspace/src \
+            -e WILIWILI_REF="$WILIWILI_REF" \
             ${{ env.IMAGE }} /bin/bash -c "bash recipes/ports/wiliwili/build.sh aarch64"
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4

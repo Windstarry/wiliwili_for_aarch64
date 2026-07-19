@@ -1,0 +1,19 @@
+# build artifacts
+build/
+ports/*/build/
+*.o
+*.a
+*.elf
+*.bin
+
+# logs
+log.txt
+*.log
+
+
+# OS
+.DS_Store
+experiments/*/build/
+
+
+/wiliwili-portmaster

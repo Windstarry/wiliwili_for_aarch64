@@ -26,7 +26,7 @@ wiliwili_for_aarch64/
 
 - 仅编译 aarch64，使用原生 ARM runner `ubuntu-24.04-arm`，通过 `docker run` 拉起已发布的
   `ghcr.io/monkeyx-net/portmaster-build-templates/portmaster-builder:aarch64-latest` 镜像（**零 QEMU 仿真**）。
-- 子模块随源码由 CI 在 runner 上 `git clone --recursive` 一并拉取（默认 `xfangfang/wiliwili` 仓库的 `master` 分支及其子模块）；若指定的 `WILIWILI_REF` 非 `master`，CI 会先 checkout 该版本再 `submodule update --init --recursive`，随后整份源码挂载进容器编译。
+- 子模块随源码由 CI 在 runner 上 `git clone --recursive` 一并拉取（默认 `Windstarry/wiliwili` 仓库，版本由 `WILIWILI_REF` 控制，当前默认 `yoga`）；CI 会无条件按 `WILIWILI_REF` checkout 该版本并 `submodule update --init --recursive`，随后整份源码挂载进容器编译。
 - 容器内仅 `apt-get install -y libmpv-dev`（0.32），镜像内已具备 webp / gl / egl / openssl / zlib / gcc / cmake。
 - 图形后端保持默认 OpenGL / GLFW；掌机侧由 Mesa / Panfrost 落地 GLES / EGL，编译端无需额外开关。
 
@@ -41,14 +41,14 @@ wiliwili_for_aarch64/
 
 ### 指定源码仓库与版本
 
-默认会拉取 `xfangfang/wiliwili@master`。若想换成你自己的 fork、或指定某个 tag / commit，有两种方式：
+默认会拉取 `Windstarry/wiliwili@yoga`。若想换成你自己的 fork、或指定某个 tag / commit，有两种方式：
 
 1. **（推荐）通过仓库 Variables 覆盖**：在本仓库 `Settings → Secrets and variables → Actions → Variables` 中新建：
    - `WILIWILI_REPO`：源码仓库地址（例如 `https://github.com/<your-name>/wiliwili.git`）。
-   - `WILIWILI_REF`：分支 / tag / commit（例如 `v1.4.0` 或 `a1b2c3d`；默认 `master`）。
+   - `WILIWILI_REF`：分支 / tag / commit（例如 `v1.4.0` 或 `a1b2c3d`；默认 `yoga`）。
 2. **直接编辑 `build.yml`**：修改顶层 `env` 中的 `WILIWILI_REPO` / `WILIWILI_REF`。
 
-> 注意：当 `WILIWILI_REF` 非 `master` 时，CI 会先 checkout 该版本，再 `submodule update --init --recursive` 重新拉取子模块。
+> 注意：CI 会无条件按 `WILIWILI_REF` 指定的版本 checkout，并 `submodule update --init --recursive` 重新拉取子模块（无论填 master / yoga / tag / commit 都精确生效）。
 
 ## 触发方式
 
@@ -61,8 +61,8 @@ wiliwili_for_aarch64/
 
 | Job | 产物 | 说明 |
 | --- | --- | --- |
-| `build` | `wiliwili-linux-aarch64.tar.gz` | 编译出的 aarch64 二进制 + `resources/` + `libs.aarch64/`（自带运行时 .so，已排除 glibc 核心库） |
-| `package` | `wiliwili.zip` | PortMaster 端口包：含 wiliwili 二进制 + resources + libs.aarch64 + `port.json` + `wiliwili.sh` |
+| `build` | `wiliwili-linux-aarch64.tar.gz` | 编译出的 aarch64 二进制 + `resources/` + `libs/`（自带运行时 .so，已排除 glibc 核心库） |
+| `package` | `wiliwili.zip` | PortMaster 端口包：含 wiliwili 二进制 + resources + libs + `port.json` + `wiliwili.sh` |
 | `release` | Release 附件 | 仅当推送 `v*` tag 时，将 `wiliwili.zip` 发布到 GitHub Release |
 
 `wiliwili.zip` 内部布局约定为：
@@ -71,7 +71,7 @@ wiliwili_for_aarch64/
 wiliwili/
 ├── wiliwili            # 二进制
 ├── resources/          # 资源
-├── libs.aarch64/       # 运行时 .so
+├── libs/              # 运行时 .so（libmpv 及全部传递依赖）
 ├── port.json           # 端口元数据
 └── wiliwili.sh         # 启动器（已 chmod +x）
 ```
@@ -86,7 +86,7 @@ wiliwili/
 
 1. **mpv 版本**：容器内 `apt install libmpv-dev` 给出的是 **mpv 0.32**。wiliwili 官方 Switch 构建使用 mpv 0.36。
    若编译报错缺少 `mpv_render_*` 等新 API，需要改用自建 Dockerfile 安装 mpv 0.36（可基于该镜像二次构建）。
-   运行时真正依赖的是 **目标掌机自己的 libmpv**，因此打包进 `libs.aarch64` 的 .so 仅供参考/兜底。
+   CI 会把 **libmpv 及其全部传递依赖** 打包进端口的 `libs/` 目录，启动器 `wiliwili.sh` 通过 `LD_LIBRARY_PATH` 指向它，因此端口自带完整运行时、不依赖掌机系统库。依赖收集对 `libmpv.so.*` 版本无关，将来升级到 mpv 0.36（SONAME 变 `libmpv.so.2`）也能正常打包。
 2. **port.json 字段**：`port.json` 的字段（title / desc / exec / image / category / method / author）需按
    目标 PortMaster 版本规范核对；不同 PortMaster 版本字段可能略有差异。
 3. **图标文件**：`port.json` 引用的 `wiliwili.png` 图标已包含在仓库
