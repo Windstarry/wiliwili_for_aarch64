@@ -89,8 +89,9 @@ wiliwili/
    运行时真正依赖的是 **目标掌机自己的 libmpv**，因此打包进 `libs.aarch64` 的 .so 仅供参考/兜底。
 2. **port.json 字段**：`port.json` 的字段（title / desc / exec / image / category / method / author）需按
    目标 PortMaster 版本规范核对；不同 PortMaster 版本字段可能略有差异。
-3. **图标文件**：`port.json` 引用的 `wiliwili.png` 图标需自行提供（本方案不含二进制图标），
-   并放入端口包内与 `port.json` 同级目录。
+3. **图标文件**：`port.json` 引用的 `wiliwili.png` 图标已包含在仓库
+   `recipes/ports/wiliwili/wiliwili.png`，CI 打包时会自动拷入端口根目录
+   `ports/wiliwili/wiliwili.png`（与 `port.json` 同级），无需另行提供。
 4. **GLFW 由子模块内置（无需系统 `libglfw3-dev`）**：wiliwili 默认 `USE_SYSTEM_GLFW=OFF`
    （见仓库 `CMakeLists.txt` 第 45 行），桌面版使用的是 **borealis 子模块内置的修改版 GLFW**
    （源码来自 `library/borealis/library/lib/extern/glfw`，即 `xfangfang/glfw` fork）。

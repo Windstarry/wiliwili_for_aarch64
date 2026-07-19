@@ -53,6 +53,7 @@ jobs:
           tar -xzf artifacts/wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/wiliwili/
           cp recipes/ports/wiliwili/port.json ports/wiliwili/wiliwili/port.json
           cp recipes/ports/wiliwili/wiliwili.sh ports/wiliwili/wiliwili/wiliwili.sh
+          cp recipes/ports/wiliwili/wiliwili.png ports/wiliwili/wiliwili.png
           chmod +x ports/wiliwili/wiliwili/wiliwili.sh
           cd ports/wiliwili && zip -r ../../wiliwili.zip .
       - uses: actions/upload-artifact@v4
