@@ -19,6 +19,92 @@ apt-get install -y --no-install-recommends \
 # patchelf 作为双保险（可选，缺失不致命）
 apt-get install -y --no-install-recommends patchelf || true
 
+# === Optional: build mpv 0.36 + ffmpeg 6 from source ===
+# 仅当 BUILD_MPV_FROM_SRC 非空且为真（非空、非 0、非 false）时，才从源码构建
+# ffmpeg 6.x + mpv 0.36.0 并安装到 /usr/local，覆盖 apt 提供的 libmpv-dev 0.32。
+# 默认（BUILD_MPV_FROM_SRC 为空）完全跳过此块，沿用 apt 的 libmpv-dev 0.32 + ffmpeg 4.2，
+# 行为与改动前字节级一致（默认 CI 路径不受影响）。
+BUILD_MPV_FROM_SRC="${BUILD_MPV_FROM_SRC:-}"
+_is_truthy() {
+  case "${1,,}" in
+    ''|0|false|no|off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+if _is_truthy "$BUILD_MPV_FROM_SRC"; then
+  echo "=== [optional] BUILD_MPV_FROM_SRC=${BUILD_MPV_FROM_SRC}: 从源码构建 ffmpeg 6 + mpv 0.36 ==="
+
+  # 0) 安装源码构建所需工具（镜像通常已含 gcc 9.4；补缺即可，缺失不致命）
+  apt-get install -y --no-install-recommends \
+    python3 python3-pip meson ninja-build pkg-config git ca-certificates \
+    libplacebo-dev libass-dev libsdl2-dev || true
+  # 编解码必需/可选的外部库（缺失则 ffmpeg 回退到最简配置）
+  apt-get install -y --no-install-recommends libx264-dev libx265-dev || true
+
+  WORK="$(mktemp -d)"
+  FFMPEG_TAG="${FFMPEG_TAG:-n6.1}"
+  MPV_TAG="${MPV_TAG:-v0.36.0}"
+
+  # 1) 构建并安装 ffmpeg 6.x（固定 tag，可复现；优先启用 x264/x265，失败则回退最简）
+  echo "=== [optional] 克隆 ffmpeg ${FFMPEG_TAG} ==="
+  git clone --depth 1 --branch "$FFMPEG_TAG" https://github.com/FFmpeg/FFmpeg.git "$WORK/ffmpeg"
+  pushd "$WORK/ffmpeg" >/dev/null
+    if ! ./configure --prefix=/usr/local --enable-shared --enable-pic \
+         --enable-gpl --enable-libx264 --enable-libx265 \
+         --disable-doc --disable-programs 2>/dev/null; then
+      echo "WARN: ffmpeg 带 x264/x265 的 configure 失败，回退到最简 --enable-shared 配置"
+      ./configure --prefix=/usr/local --enable-shared --enable-pic \
+        --disable-doc --disable-programs \
+        || { echo "ERROR: ffmpeg configure 失败，请检查构建依赖。" >&2; exit 1; }
+    fi
+    make -j"$(nproc)" \
+      || { echo "ERROR: ffmpeg 编译失败。" >&2; exit 1; }
+    make install \
+      || { echo "ERROR: ffmpeg 安装失败。" >&2; exit 1; }
+  popd >/dev/null
+  ldconfig
+
+  # 2) 构建并安装 mpv 0.36（依赖上一步安装的 ffmpeg；通过 PKG_CONFIG_PATH 发现）
+  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+  echo "=== [optional] 克隆 mpv ${MPV_TAG} ==="
+  git clone --depth 1 --branch "$MPV_TAG" https://github.com/mpv-player/mpv.git "$WORK/mpv"
+  pushd "$WORK/mpv" >/dev/null
+    meson setup build \
+      --prefix=/usr/local \
+      -Dbuildtype=release \
+      -Ddefault_library=shared \
+      -Dlibmpv=enabled \
+      -Dlibmpv-shared=true \
+      -Dgpl=true \
+      -Dlua=disabled \
+      -Djavascript=disabled \
+      -Diconv=disabled \
+      || { echo "ERROR: mpv meson setup 失败，请检查 libass/libplacebo 等依赖。" >&2; exit 1; }
+    meson compile -C build -j"$(nproc)" \
+      || { echo "ERROR: mpv 编译失败。" >&2; exit 1; }
+    meson install -C build \
+      || { echo "ERROR: mpv 安装失败。" >&2; exit 1; }
+  popd >/dev/null
+  ldconfig
+
+  # 3) 移除 apt 安装的旧 libmpv-dev（避免 cmake 误链 0.32 头文件/库）；失败不致命
+  apt-get remove -y --purge libmpv-dev libmpv2 2>/dev/null || true
+
+  # 4) 确保后续 cmake 优先使用 /usr/local 中的 mpv 0.36
+  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+  # 5) 校验：源码构建的 libmpv 必须可被 ldconfig 发现，否则后续打包会失败
+  if ! ldconfig -p 2>/dev/null | awk '$1 ~ /^libmpv\.so\./ {found=1} END{exit !found}'; then
+    echo "ERROR: 源码构建后 ldconfig 未找到 libmpv.so.*，构建环境异常。" >&2
+    exit 1
+  fi
+
+  rm -rf "$WORK"
+  echo "=== [optional] mpv 0.36 + ffmpeg 6 源码构建完成（libmpv 已安装至 /usr/local）==="
+else
+  echo "=== [optional] BUILD_MPV_FROM_SRC 未设置/为假，跳过源码构建（沿用 apt libmpv-dev 0.32）==="
+fi
+
 # 2) 配置 + 编译
 cmake -B build -DPLATFORM_DESKTOP=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target wiliwili -j"$(nproc)"

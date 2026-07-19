@@ -11,6 +11,9 @@ env:
   WILIWILI_REPO: https://github.com/Windstarry/wiliwili.git
   # 源码版本：默认 master。可指定 tag / commit / 分支名，例如 v1.4.0 或 a1b2c3d
   WILIWILI_REF: yoga
+  # 可选：从源码构建 mpv 0.36 + ffmpeg 6（默认空 = 沿用 apt 的 libmpv-dev 0.32）。
+  # 设为任意真值（如 "1" / "true"）可开启源码构建路径。
+  BUILD_MPV_FROM_SRC: ''
 jobs:
   build:
     name: Build aarch64 Binary
@@ -26,6 +29,7 @@ jobs:
           docker run --rm -v "$PWD":/workspace -w /workspace \
             -e DEBIAN_FRONTEND=noninteractive -e SOURCE_DIR=/workspace/src \
             -e WILIWILI_REF="$WILIWILI_REF" \
+            -e BUILD_MPV_FROM_SRC="$BUILD_MPV_FROM_SRC" \
             ${{ env.IMAGE }} /bin/bash -c "bash recipes/ports/wiliwili/build.sh aarch64"
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
