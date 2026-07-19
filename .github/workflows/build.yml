@@ -1,0 +1,69 @@
+name: Build wiliwili (aarch64)
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+env:
+  IMAGE: ghcr.io/monkeyx-net/portmaster-build-templates/portmaster-builder:aarch64-latest
+jobs:
+  build:
+    name: Build aarch64 Binary
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build in container
+        run: |
+          docker run --rm -v "$PWD":/workspace -w /workspace \
+            -e DEBIAN_FRONTEND=noninteractive \
+            ${{ env.IMAGE }} /bin/bash -c "bash recipes/ports/wiliwili/build.sh aarch64"
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiliwili-linux-aarch64
+          path: wiliwili-linux-aarch64.tar.gz
+          retention-days: 7
+  package:
+    name: Package PortMaster
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wiliwili-linux-aarch64
+          path: artifacts
+      - name: Assemble PortMaster port
+        run: |
+          mkdir -p ports/wiliwili/wiliwili
+          tar -xzf artifacts/wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/wiliwili/
+          cp recipes/ports/wiliwili/port.json ports/wiliwili/wiliwili/port.json
+          cp recipes/ports/wiliwili/wiliwili.sh ports/wiliwili/wiliwili/wiliwili.sh
+          chmod +x ports/wiliwili/wiliwili/wiliwili.sh
+          cd ports/wiliwili && zip -r ../../wiliwili.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wiliwili-portmaster
+          path: wiliwili.zip
+          retention-days: 7
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wiliwili-portmaster
+          path: release
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/wiliwili.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

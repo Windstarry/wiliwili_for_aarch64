@@ -1,0 +1,9 @@
+{
+  "title": "wiliwili",
+  "desc": "跨平台 Bilibili 客户端 (aarch64)",
+  "exec": "wiliwili.sh",
+  "image": "wiliwili.png",
+  "category": "Utilities",
+  "method": "aarch64",
+  "author": "Windstarry"
+}

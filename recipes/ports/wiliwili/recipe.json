@@ -1,0 +1,9 @@
+{
+  "recipe_version": 1,
+  "name": "wiliwili.zip",
+  "source": {
+    "port_exe": "wiliwili",
+    "port_version": "",
+    "date_updated": "2026-07-19"
+  }
+}
