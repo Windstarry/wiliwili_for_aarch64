@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 ARCH="${1:-aarch64}"
-echo "=== wiliwili aarch64 build (arch=${ARCH}) ==="
+SRC="${SOURCE_DIR:-.}"
+echo "=== wiliwili aarch64 build (arch=${ARCH}, src=${SRC}) ==="
+cd "$SRC"
 
 # 1) 安装构建依赖（镜像已含 webp/gl/egl/openssl/zlib，仅需补 mpv + x11 dev）
 apt-get update

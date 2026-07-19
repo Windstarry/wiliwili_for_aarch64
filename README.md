@@ -26,23 +26,29 @@ wiliwili_for_aarch64/
 
 - 仅编译 aarch64，使用原生 ARM runner `ubuntu-24.04-arm`，通过 `docker run` 拉起已发布的
   `ghcr.io/monkeyx-net/portmaster-build-templates/portmaster-builder:aarch64-latest` 镜像（**零 QEMU 仿真**）。
-- 子模块在 runner 上由 `actions/checkout` 的 `submodules: recursive` 拉取，再挂载进容器。
+- 子模块随源码由 CI 在 runner 上 `git clone --recursive` 一并拉取（默认 `xfangfang/wiliwili` 仓库的 `master` 分支及其子模块）；若指定的 `WILIWILI_REF` 非 `master`，CI 会先 checkout 该版本再 `submodule update --init --recursive`，随后整份源码挂载进容器编译。
 - 容器内仅 `apt-get install -y libmpv-dev`（0.32），镜像内已具备 webp / gl / egl / openssl / zlib / gcc / cmake。
 - 图形后端保持默认 OpenGL / GLFW；掌机侧由 Mesa / Panfrost 落地 GLES / EGL，编译端无需额外开关。
 
 ## 使用方式
 
-将本目录下的 `.github/` 与 `recipes/` 两个目录拷贝 / 合并进 wiliwili 仓库根目录即可（或直接在仓库根建立相同结构）：
+本仓库现已**自包含**：它只含 CI 构建文件（`.github/` 与 `recipes/`），**不含 wiliwili 源码**。
+工作流在运行时由 CI 自动 clone 官方 wiliwili 源码（含子模块）到 `src/`，再挂载进容器编译打包，
+因此**无需再把 `.github/` 与 `recipes/` 合并进 wiliwili 源码仓**即可跑。
 
-```bash
-# 在 wiliwili 仓库根目录执行
-cp -r wiliwili_for_aarch64/.github wiliwili_for_aarch64/recipes <仓库根>/
-```
+- **手动触发**：在本仓库 Actions 页面点击 `Build wiliwili (aarch64)` 工作流的 `Run workflow`（即 `workflow_dispatch`）。
+- **自动发布**：推送 `v*` 形式的 tag（例如 `v1.0.0`）时，工作流会自动编译并发布 Release。
 
-拷贝后 `build.yml` 应位于 `<仓库根>/.github/workflows/build.yml`，`recipes/...` 应位于 `<仓库根>/recipes/...`，
-这样工作流里的 `bash recipes/ports/wiliwili/build.sh aarch64` 路径才正确。
+### 指定源码仓库与版本
 
-**不要把本目录整体放成仓库子目录**，否则 `build.yml` 的相对路径会错位。
+默认会拉取 `xfangfang/wiliwili@master`。若想换成你自己的 fork、或指定某个 tag / commit，有两种方式：
+
+1. **（推荐）通过仓库 Variables 覆盖**：在本仓库 `Settings → Secrets and variables → Actions → Variables` 中新建：
+   - `WILIWILI_REPO`：源码仓库地址（例如 `https://github.com/<your-name>/wiliwili.git`）。
+   - `WILIWILI_REF`：分支 / tag / commit（例如 `v1.4.0` 或 `a1b2c3d`；默认 `master`）。
+2. **直接编辑 `build.yml`**：修改顶层 `env` 中的 `WILIWILI_REPO` / `WILIWILI_REF`。
+
+> 注意：当 `WILIWILI_REF` 非 `master` 时，CI 会先 checkout 该版本，再 `submodule update --init --recursive` 重新拉取子模块。
 
 ## 触发方式
 
@@ -88,7 +94,7 @@ wiliwili/
 4. **GLFW 由子模块内置（无需系统 `libglfw3-dev`）**：wiliwili 默认 `USE_SYSTEM_GLFW=OFF`
    （见仓库 `CMakeLists.txt` 第 45 行），桌面版使用的是 **borealis 子模块内置的修改版 GLFW**
    （源码来自 `library/borealis/library/lib/extern/glfw`，即 `xfangfang/glfw` fork）。
-   该子模块会经 `actions/checkout submodules: recursive` 一并拉取，编译时由 borealis 的
+   该子模块会随源码在 CI 中经 `git clone --recursive` 一并拉取，编译时由 borealis 的
    toolchain 从源码构建。因此 `build.sh` 的 `apt-get install` **不需要** `libglfw3-dev`；
    已安装的 `libx11-dev / libxrandr-dev / libxinerama-dev / libxcursor-dev / libxi-dev` 以及
    `libgl1-mesa-dev / libegl1-mesa-dev / libgles2-mesa-dev` 已足够让内置 GLFW 完成编译。
@@ -100,4 +106,3 @@ wiliwili/
 
 - `build.sh` / `wiliwili.sh` 通过 `bash -n` 语法检查。
 - `recipe.json` / `port.json` 为合法 JSON。
-# wiliwili_for_aarch64
