@@ -132,11 +132,29 @@ is_core() {
   # libwayland-client(1.23，含该符号)，导致系统 libdecor 加载失败
   # (undefined symbol: wl_proxy_marshal_flags)。剔除后运行期由 LD_LIBRARY_PATH 回退到
   # 实机系统自带的 libwayland 全套与之匹配。依赖目标固件系统 libwayland 全套在位。
+  #
+  # GLib / libdrm / libxkbcommon 全族同样交由目标固件系统提供（不打包）：
+  # 修复 libwayland 后，实机运行期又暴露同一模式的连锁符号缺失——构建机镜像自带的旧版底层库
+  # 被打包进 libs/，经 LD_LIBRARY_PATH 优先于系统库加载，导致实机系统上层组件解析到旧版底层库：
+  #   1) 我们 libs/ 旧版 libglib-2.0.so.0(<2.72) 不含 g_once_init_enter_pointer，
+  #      而实机系统 libatk-1.0.so.0(较新，需 GLib>=2.72) 经 LD_LIBRARY_PATH 复用到它，
+  #      报错 undefined symbol: g_once_init_enter_pointer；
+  #   2) 我们 libs/ 旧版 libdrm.so.2 不含 drmGetDeviceFromDevId，
+  #      实机系统 libEGL_mesa.so.0 经 LD_LIBRARY_PATH 复用到它，
+  #      报错 undefined symbol: drmGetDeviceFromDevId；
+  #   3) 我们 libs/ 旧版 libxkbcommon.so.0 与实机系统 X11 Compose 文件版本不匹配，
+  #      报错 unrecognized keysym "dead_hamza"（warning，回退系统可消）。
+  # 实机 RockNIX 固件系统自带这些库的较新且互相兼容的版本（GLib 2.85.1 / libdrm 2.128 / 系统 libxkbcommon），
+  # 剔除后运行期由 LD_LIBRARY_PATH 回退到系统库，与系统 libatk / libEGL_mesa / X11 Compose 完全匹配。
+  # 依赖目标固件系统提供这些库（RockNIX 实机已确认在位）。
   case "$(basename "$1")" in
     libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libgcc_s.so*|\
     libstdc++.so*|ld-linux-*|linux-vdso.so*|libutil.so*|libresolv.so*|\
     libBrokenLocale.so*|libmvec.so*|libnsl.so*|libpcprofile.so*|\
-    libwayland-client.so*|libwayland-cursor.so*|libwayland-egl.so*|libwayland-server.so*) return 0 ;;
+    libwayland-client.so*|libwayland-cursor.so*|libwayland-egl.so*|libwayland-server.so*|\
+    libglib-2.0.so*|libgobject-2.0.so*|libgmodule-2.0.so*|libgthread-2.0.so*|libgio-2.0.so*|\
+    libdrm.so*|libdrm_*.so*|\
+    libxkbcommon.so*|libxkbcommon-x11.so*|libxkbregistry.so*) return 0 ;;
     *) return 1 ;;
   esac
 }
