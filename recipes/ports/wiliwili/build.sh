@@ -112,7 +112,17 @@ else
 fi
 
 # 2) 配置 + 编译
-cmake -B build -DPLATFORM_DESKTOP=ON -DCMAKE_BUILD_TYPE=Release
+# aarch64 优化参数：沿用 PortMaster 镜像自带 aarch64-linux-gnu 工具链，不引用任何外部 SDK/sysroot。
+# 借鉴 dragonflylee/trimui-port 的微架构基线（Cortex-A53）：以 -march=armv8-a 通用 ISA 为底线
+# （A53/A55/A72 全兼容，绝不 SIGILL），-mtune=cortex-a53 仅做指令调度调优（不改 ISA）。
+# 多机型混合分发，故不用 -mcpu=cortex-a55（避免老 A53 设备非法指令崩溃）。LTO 关闭（轻量安全）。
+# 通过 cmake 命令行 -DCMAKE_C_FLAGS/-DCMAKE_CXX_FLAGS 注入（优先级高，不依赖上游 CMakeLists 是否追加式书写）。
+cmake -B build \
+  -DPLATFORM_DESKTOP=ON \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_FLAGS="-pipe -fomit-frame-pointer -march=armv8-a -mtune=cortex-a53 -ffunction-sections -fdata-sections" \
+  -DCMAKE_CXX_FLAGS="-pipe -fomit-frame-pointer -march=armv8-a -mtune=cortex-a53 -ffunction-sections -fdata-sections" \
+  -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -Wl,--as-needed"
 cmake --build build --target wiliwili -j"$(nproc)"
 
 # 3) 收集产物
