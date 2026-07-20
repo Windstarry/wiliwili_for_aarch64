@@ -116,7 +116,7 @@ fi
 # 借鉴 dragonflylee/trimui-port 的微架构基线（Cortex-A53）：以 -march=armv8-a 通用 ISA 为底线
 # （A53/A55/A72 全兼容，绝不 SIGILL），-mtune=cortex-a53 仅做指令调度调优（不改 ISA）。
 # 多机型混合分发，故不用 -mcpu=cortex-a55（避免老 A53 设备非法指令崩溃）。LTO 关闭（轻量安全）。
-# 通过 cmake 命令行 -DCMAKE_C_FLAGS/-DCMAKE_CXX_FLAGS 注入（优先级高，不依赖上游 CMakeLists 是否追加式书写）。
+# 通过 cmake 命令行 -DCMAKE_C_FLAGS/-DCMAKE_CXX_FLAGS 注入（cmake 标准全局传参方式；wiliwili 为常规 CMake 项目、以追加式书写 CMAKE_CXX_FLAGS，本注入稳定生效，且高于 CXXFLAGS 环境变量优先级）。
 cmake -B build \
   -DPLATFORM_DESKTOP=ON \
   -DCMAKE_BUILD_TYPE=Release \
