@@ -126,35 +126,61 @@ DEST="dist/libs"
 mkdir -p "$DEST"
 
 is_core() {
-  # libwayland 全族交由目标固件系统提供（不打包）：
-  # 构建机镜像(portmaster-builder:aarch64-latest)自带 libwayland-client 过旧(<1.20)，
-  # 不含 wl_proxy_marshal_flags；若打包进 libs/ 会经 LD_LIBRARY_PATH 覆盖实机系统较新的
-  # libwayland-client(1.23，含该符号)，导致系统 libdecor 加载失败
-  # (undefined symbol: wl_proxy_marshal_flags)。剔除后运行期由 LD_LIBRARY_PATH 回退到
-  # 实机系统自带的 libwayland 全套与之匹配。依赖目标固件系统 libwayland 全套在位。
+  # === 打包策略：反转版（白名单式"系统已有库"排除，而非逐个排除库族）===
+  # 本清单基于 2026-07-20 RockNIX 实机审计（逐库比对 /usr/lib）整理：
+  #   - 实机系统已有的库（共 90 个 soname，见下方 SYS_LIST）-> 交给系统，不打包；
+  #   - 其余（固件缺失、必须自带的库，约 192 个，典型为 libmpv.so.1 + ffmpeg 全套
+  #     libav*/libpostproc/libswscale/libswresample/libavutil/libavcodec/libavformat/
+  #     libavfilter/libavdevice/libavresample、samba/heimdal/krb5 可选依赖、OpenSSL1.1
+  #     libssl.so.1.1/libcrypto.so.1.1、libffi.so.7、libpcre/libpcre2 等）-> 打包进 libs/。
+  # 根因（为什么必须这么做）：构建机镜像(portmaster-builder:aarch64-latest)自带的底层库普遍
+  # 较旧；若把系统已有的库也打进 libs/，运行期 LD_LIBRARY_PATH 会优先加载这些旧库而非实机系统
+  # 较新的库，导致实机上层组件解析到旧版符号而报 undefined symbol（如 wl_proxy_marshal_flags、
+  # g_once_init_enter_pointer、drmGetDeviceFromDevId 等连锁缺失）。
+  # 改为"只打包固件确实缺失的库"后，libs/ 不会再出现任何系统已有库，从源头消除了旧库覆盖新
+  # 系统库的错配；运行期这些库自然由 LD_LIBRARY_PATH 回退到实机系统库。
   #
-  # GLib / libdrm / libxkbcommon 全族同样交由目标固件系统提供（不打包）：
-  # 修复 libwayland 后，实机运行期又暴露同一模式的连锁符号缺失——构建机镜像自带的旧版底层库
-  # 被打包进 libs/，经 LD_LIBRARY_PATH 优先于系统库加载，导致实机系统上层组件解析到旧版底层库：
-  #   1) 我们 libs/ 旧版 libglib-2.0.so.0(<2.72) 不含 g_once_init_enter_pointer，
-  #      而实机系统 libatk-1.0.so.0(较新，需 GLib>=2.72) 经 LD_LIBRARY_PATH 复用到它，
-  #      报错 undefined symbol: g_once_init_enter_pointer；
-  #   2) 我们 libs/ 旧版 libdrm.so.2 不含 drmGetDeviceFromDevId，
-  #      实机系统 libEGL_mesa.so.0 经 LD_LIBRARY_PATH 复用到它，
-  #      报错 undefined symbol: drmGetDeviceFromDevId；
-  #   3) 我们 libs/ 旧版 libxkbcommon.so.0 与实机系统 X11 Compose 文件版本不匹配，
-  #      报错 unrecognized keysym "dead_hamza"（warning，回退系统可消）。
-  # 实机 RockNIX 固件系统自带这些库的较新且互相兼容的版本（GLib 2.85.1 / libdrm 2.128 / 系统 libxkbcommon），
-  # 剔除后运行期由 LD_LIBRARY_PATH 回退到系统库，与系统 libatk / libEGL_mesa / X11 Compose 完全匹配。
-  # 依赖目标固件系统提供这些库（RockNIX 实机已确认在位）。
+  # 核心运行时库（libc/libm/libpthread/libdl/librt/libgcc_s/libstdc++/ld-linux/linux-vdso/
+  # libutil/libresolv 等）始终排除，依赖目标固件系统提供（不在下方 90 个 SYS soname 内，如
+  # libstdc++ 当前未被打包故未出现在审计清单，但必须继续排除）。
+  #
+  # 注：libwayland 全族、libgthread-2.0、libxkbcommon-x11、libxkbregistry 同样交给系统
+  # （实机系统自带 libwayland-client 1.23 等），虽未列入下方 90 个 SYS soname（因它们早先已被
+  # 排除、不出现在部署 libs/ 中，故审计比对无从命中），但系统确已有之，仍需显式排除，否则会
+  # 重新引入 wl_proxy_marshal_flags 等缺失；libxkbcommon.so.0 本身已进 SYS_LIST。
+  #
+  # ⚠ 目标固件系统库清单随固件升级需复核更新：每次 RockNIX 固件大版本升级后，应重新比对 /usr/lib，
+  # 据此增删下方 SYS_LIST，避免把新版固件已提供的库误打包、或漏打包固件新缺失的库。
   case "$(basename "$1")" in
+    # 排除清单（命中则 return 0 不打包，交给系统）：核心运行时库 + libwayland 全族 + 2026-07-20
+    # RockNIX 实机审计的 90 个系统已有 soname（按 X11/xcb、SDL/GL/EGL/DRM、GLib/GTK/Pango/Cairo、
+    # 声音/多媒体、samba/heimdal/ndr、压缩/加密/系统基础 分组，详见上方 is_core 注释）。
     libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libgcc_s.so*|\
     libstdc++.so*|ld-linux-*|linux-vdso.so*|libutil.so*|libresolv.so*|\
     libBrokenLocale.so*|libmvec.so*|libnsl.so*|libpcprofile.so*|\
+    libgthread-2.0.so*|\
     libwayland-client.so*|libwayland-cursor.so*|libwayland-egl.so*|libwayland-server.so*|\
-    libglib-2.0.so*|libgobject-2.0.so*|libgmodule-2.0.so*|libgthread-2.0.so*|libgio-2.0.so*|\
-    libdrm.so*|libdrm_*.so*|\
-    libxkbcommon.so*|libxkbcommon-x11.so*|libxkbregistry.so*) return 0 ;;
+    libX11.so*|libXau.so*|libXcursor.so*|libXdmcp.so*|libXext.so*|libXfixes.so*|\
+    libXi.so*|libXinerama.so*|libXrandr.so*|libXrender.so*|libXss.so*|libXxf86vm.so*|\
+    libxcb.so*|libxcb-render.so*|libxcb-shape.so*|libxcb-shm.so*|libxcb-xfixes.so*|\
+    libSDL2-2.0.so*|libEGL.so*|libGL.so*|libGLX.so*|libGLdispatch.so*|libgbm.so*|\
+    libvdpau.so*|libdrm.so*|libdrm_*.so*|\
+    libglib-2.0.so*|libgobject-2.0.so*|libgmodule-2.0.so*|libgio-2.0.so*|\
+    libcairo.so*|libcairo-gobject.so*|libpango-1.0.so*|libpangocairo-1.0.so*|\
+    libpangoft2-1.0.so*|libgdk_pixbuf-2.0.so*|libpixman-1.so*|libthai.so*|\
+    libdatrie.so*|libharfbuzz.so*|\
+    libasound.so*|libpulse.so*|libopenal.so*|libsndfile.so*|libspeex.so*|libogg.so*|\
+    libvorbis.so*|libvorbisenc.so*|libvorbisfile.so*|libmpg123.so*|libwavpack.so*|\
+    libsamba-errors.so*|libsamba-util.so*|libsmbclient.so*|libsmbconf.so*|\
+    libwbclient.so*|libndr-krb5pac.so*|libndr-nbt.so*|libndr-standard.so*|\
+    libtalloc.so*|libdcerpc-binding.so*|\
+    libz.so*|libzstd.so*|libbz2.so*|liblzma.so*|libexpat.so*|libfreetype.so*|\
+    libfontconfig.so*|libpng16.so*|libjpeg.so*|liblcms2.so*|libgcrypt.so*|\
+    libgpg-error.so*|libgmp.so*|libgnutls.so*|libidn2.so*|libsqlite3.so*|\
+    libsystemd.so*|libudev.so*|libusb-1.0.so*|libdbus-1.so*|libblkid.so*|\
+    libmount.so*|libuuid.so*|libarchive.so*|libass.so*|libfribidi.so*|\
+    libgomp.so*|libtinfo.so*|libncursesw.so*|libxkbcommon.so*|\
+    libxkbcommon-x11.so*|libxkbregistry.so*) return 0 ;;
     *) return 1 ;;
   esac
 }
