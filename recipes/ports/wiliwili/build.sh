@@ -126,10 +126,17 @@ DEST="dist/libs"
 mkdir -p "$DEST"
 
 is_core() {
+  # libwayland 全族交由目标固件系统提供（不打包）：
+  # 构建机镜像(portmaster-builder:aarch64-latest)自带 libwayland-client 过旧(<1.20)，
+  # 不含 wl_proxy_marshal_flags；若打包进 libs/ 会经 LD_LIBRARY_PATH 覆盖实机系统较新的
+  # libwayland-client(1.23，含该符号)，导致系统 libdecor 加载失败
+  # (undefined symbol: wl_proxy_marshal_flags)。剔除后运行期由 LD_LIBRARY_PATH 回退到
+  # 实机系统自带的 libwayland 全套与之匹配。依赖目标固件系统 libwayland 全套在位。
   case "$(basename "$1")" in
     libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libgcc_s.so*|\
     libstdc++.so*|ld-linux-*|linux-vdso.so*|libutil.so*|libresolv.so*|\
-    libBrokenLocale.so*|libmvec.so*|libnsl.so*|libpcprofile.so*) return 0 ;;
+    libBrokenLocale.so*|libmvec.so*|libnsl.so*|libpcprofile.so*|\
+    libwayland-client.so*|libwayland-cursor.so*|libwayland-egl.so*|libwayland-server.so*) return 0 ;;
     *) return 1 ;;
   esac
 }
