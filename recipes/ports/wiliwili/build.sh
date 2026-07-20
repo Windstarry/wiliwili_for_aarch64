@@ -5,6 +5,12 @@ SRC="${SOURCE_DIR:-.}"
 echo "=== wiliwili ${ARCH} build (arch=${ARCH}, src=${SRC}) ==="
 cd "$SRC"
 
+# 修复容器挂载导致的 git "dubious ownership"（宿主 uid ≠ 容器内 git 用户 uid）
+# 主仓库及可能的 submodule 工作树均由宿主 runner uid 拥有，挂载进容器后
+# 容器内 git 用户（多为 root）uid 与之不同，首次 git 操作即报此错。
+# CI 为一次性构建容器，使用通配接受所有目录，避免主仓库或 submodule 各自再报。
+git config --global --add safe.directory '*'
+
 # 0) 切换到指定源码版本（无条件；默认分支已是目标时是 no-op，不报错）
 REF="${WILIWILI_REF:-master}"
 git -C "$SRC" checkout "$REF"
