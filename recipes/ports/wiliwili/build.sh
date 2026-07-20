@@ -149,6 +149,21 @@ is_core() {
   # 排除、不出现在部署 libs/ 中，故审计比对无从命中），但系统确已有之，仍需显式排除，否则会
   # 重新引入 wl_proxy_marshal_flags 等缺失；libxkbcommon.so.0 本身已进 SYS_LIST。
   #
+  # === GPU/mesa GL 栈（libGL/libGLX/libGLdispatch/libEGL/libgbm）特殊说明 ===
+  #   常规情况下这些 GL/EGL/GBM 客户端调度库应交给实机系统提供（此前一直列入下方 SYS_LIST 排除）。
+  #   但实机 RockNIX 的 /usr/lib/libGL.so.1 当前损坏（file too short：悬空符号链接或截断文件），
+  #   一旦将其委托系统，加载依赖树时即报
+  #     "./wiliwili: error while loading shared libraries: /usr/lib/libGL.so.1: file too short"
+  #   导致程序无法启动。
+  #   因此本构建改由构建机镜像打包【自包含】的 mesa GL 栈（libGL/libGLX/libGLdispatch/libEGL/libgbm），
+  #   其 ABI 与镜像内其余被打包的库（libmpv/ffmpeg 等）一致，历史已验证可在该设备正常加载
+  #   （反转前的黑名单时代 libGL 即被打包进 libs/，当时的报错停在更靠后的 atk/drm/xkbcommon，
+  #   证明 GL 加载阶段早已通过）。
+  #   而系统侧真正的 GL 实现库 libEGL_mesa.so.0 / libGLX_mesa.so.0 等仍由系统提供
+  #   （配合系统较新的 libdrm，drmGetDeviceFromDevId 不再缺失）。
+  #   ⮕ 若日后固件修复了系统 libGL（/usr/lib/libGL.so.1 恢复为合法 ELF），可重新将这 5 个
+  #     soname 交还系统、恢复下方 SYS_LIST 排除，以减小 libs/ 体积。
+  #
   # ⚠ 目标固件系统库清单随固件升级需复核更新：每次 RockNIX 固件大版本升级后，应重新比对 /usr/lib，
   # 据此增删下方 SYS_LIST，避免把新版固件已提供的库误打包、或漏打包固件新缺失的库。
   case "$(basename "$1")" in
@@ -163,7 +178,7 @@ is_core() {
     libX11.so*|libXau.so*|libXcursor.so*|libXdmcp.so*|libXext.so*|libXfixes.so*|\
     libXi.so*|libXinerama.so*|libXrandr.so*|libXrender.so*|libXss.so*|libXxf86vm.so*|\
     libxcb.so*|libxcb-render.so*|libxcb-shape.so*|libxcb-shm.so*|libxcb-xfixes.so*|\
-    libSDL2-2.0.so*|libEGL.so*|libGL.so*|libGLX.so*|libGLdispatch.so*|libgbm.so*|\
+    libSDL2-2.0.so*|\
     libvdpau.so*|libdrm.so*|libdrm_*.so*|\
     libglib-2.0.so*|libgobject-2.0.so*|libgmodule-2.0.so*|libgio-2.0.so*|\
     libcairo.so*|libcairo-gobject.so*|libpango-1.0.so*|libpangocairo-1.0.so*|\
