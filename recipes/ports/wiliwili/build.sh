@@ -159,20 +159,24 @@ is_core() {
   # 排除、不出现在部署 libs/ 中，故审计比对无从命中），但系统确已有之，仍需显式排除，否则会
   # 重新引入 wl_proxy_marshal_flags 等缺失；libxkbcommon.so.0 本身已进 SYS_LIST。
   #
-  # === GPU/mesa GL 栈（libGL/libGLX/libGLdispatch/libEGL/libgbm）特殊说明 ===
-  #   常规情况下这些 GL/EGL/GBM 客户端调度库应交给实机系统提供（此前一直列入下方 SYS_LIST 排除）。
-  #   但实机 RockNIX 的 /usr/lib/libGL.so.1 当前损坏（file too short：悬空符号链接或截断文件），
-  #   一旦将其委托系统，加载依赖树时即报
-  #     "./wiliwili: error while loading shared libraries: /usr/lib/libGL.so.1: file too short"
-  #   导致程序无法启动。
-  #   因此本构建改由构建机镜像打包【自包含】的 mesa GL 栈（libGL/libGLX/libGLdispatch/libEGL/libgbm），
-  #   其 ABI 与镜像内其余被打包的库（libmpv/ffmpeg 等）一致，历史已验证可在该设备正常加载
-  #   （反转前的黑名单时代 libGL 即被打包进 libs/，当时的报错停在更靠后的 atk/drm/xkbcommon，
-  #   证明 GL 加载阶段早已通过）。
-  #   而系统侧真正的 GL 实现库 libEGL_mesa.so.0 / libGLX_mesa.so.0 等仍由系统提供
-  #   （配合系统较新的 libdrm，drmGetDeviceFromDevId 不再缺失）。
-  #   ⮕ 若日后固件修复了系统 libGL（/usr/lib/libGL.so.1 恢复为合法 ELF），可重新将这 5 个
-  #     soname 交还系统、恢复下方 SYS_LIST 排除，以减小 libs/ 体积。
+  # === GPU/mesa GL 栈（libGL/libGLX/libGLdispatch/libEGL/libgbm）打包策略：部分 revert ===
+  #   实机 RockNIX（PX30 + Mali-G31 Bifrost，封闭 Mali DDK r52p0）的 /usr/lib/libGL.so.1 当前
+  #   损坏（file too short：悬空符号链接或截断文件），故 libGL/libGLX/libGLdispatch 三件套仍由
+  #   构建机镜像打包（自包含 Mesa GL 客户端栈），以满足 libmpv.so.1 与 libavdevice.so.58 对
+  #   libGL.so.1 的硬链接；一旦委托系统，加载即报 "libGL.so.1: file too short" 崩溃。
+  #
+  #   但 libEGL.so* 与 libgbm.so* 必须【交还系统】（重新列入下方排除清单），原因：
+  #   - no-image 根因：自打包的 Mesa libEGL/libgbm 经 LD_LIBRARY_PATH 优先遮蔽了设备系统 Mali
+  #     DDK 提供的 libEGL/libgbm；Mesa EGL 无法在 Mali GPU 上创建渲染面 → 黑屏无图。
+  #   - 实机对照样本 wiliwili160（/roms/ports/wiliwili160，纯系统 GL）GL 信息实证：
+  #       GL Vendor: ARM / Renderer: Mali-G31 / GL ES 3.2 —— 证明系统 Mali 栈可正常出图。
+  #   - 交还系统后，SDL2/EGL 显示面改用系统 Mali libEGL/libgbm 渲染 → 出图；
+  #     而 libmpv/libavdevice 硬链接的 libGL 仍解析到打包的合法 Mesa libGL → 不触发损坏系统 libGL。
+  #   - 硬链接校验（GL_HARDLINK_CHECK.md）：仅 libmpv.so.1 与 libavdevice.so.58 硬链接 libGL.so.1；
+  #     libEGL/libgbm 仅被 libmpv.so.1 硬链接，交还系统后回退到有效 Mali 版本，无崩溃风险。
+  #
+  #   ⮕ 当前策略：libGL/libGLX/libGLdispatch 打包（避 file-too-short），libEGL/libgbm 交系统（修 no-image）。
+  #     若日后固件修复系统 libGL，可再把 libGL 三件套也交还系统，彻底与 wiliwili160 对齐。
   #
   # ⚠ 目标固件系统库清单随固件升级需复核更新：每次 RockNIX 固件大版本升级后，应重新比对 /usr/lib，
   # 据此增删下方 SYS_LIST，避免把新版固件已提供的库误打包、或漏打包固件新缺失的库。
@@ -189,7 +193,7 @@ is_core() {
     libXi.so*|libXinerama.so*|libXrandr.so*|libXrender.so*|libXss.so*|libXxf86vm.so*|\
     libxcb.so*|libxcb-render.so*|libxcb-shape.so*|libxcb-shm.so*|libxcb-xfixes.so*|\
     libSDL2-2.0.so*|\
-    libvdpau.so*|libdrm.so*|libdrm_*.so*|\
+    libvdpau.so*|libdrm.so*|libdrm_*.so*|libEGL.so*|libgbm.so*|\
     libglib-2.0.so*|libgobject-2.0.so*|libgmodule-2.0.so*|libgio-2.0.so*|\
     libcairo.so*|libcairo-gobject.so*|libpango-1.0.so*|libpangocairo-1.0.so*|\
     libpangoft2-1.0.so*|libgdk_pixbuf-2.0.so*|libpixman-1.so*|libthai.so*|\
