@@ -1,0 +1,2 @@
+# Force LF line endings for shell scripts so git checkout on Windows (autocrlf) does not produce CRLF that breaks bash on Linux devices.
+*.sh text eol=lf
