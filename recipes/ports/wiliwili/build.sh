@@ -116,6 +116,32 @@ else
   echo "=== [optional] BUILD_MPV_FROM_SRC 未设置/为假，跳过源码构建（沿用 apt libmpv-dev 0.32）==="
 fi
 
+# === 防御性补丁：修复 fmt v12 对 null const char* 抛 format_error 崩溃 ===
+# 根因：borealis 的 SDLVideoContext 构造时通过 Logger::info 打印 GL 信息：
+#   Logger::info("sdl: GL Vendor: {}",   (const char*)glGetString(GL_VENDOR));
+#   Logger::info("sdl: GL Renderer: {}", (const char*)glGetString(GL_RENDERER));
+#   Logger::info("sdl: GL Version: {}",  (const char*)glGetString(GL_VERSION));
+# 这三处把 glGetString(...) 的返回值（const char*）直接喂给 fmt::format。
+# 本机 RockNIX + Mali-G31（闭源 DDK）+ 自打包 Mesa libGL 的环境下，GL 上下文未必按
+# 桌面 OpenGL 3.2 CORE 路径正常建立，glGetString 可能返回 NULL。fmt 自 v9 起对 null
+# const char* 抛 format_error("string pointer is null") 并 abort；旧版 wiliwili160 用
+# 旧 fmt（容忍 null、打印 "(null)"）故不崩，yoga 构建链 fmt v12 更严格 -> 命中此崩溃
+# （与上游 issue #570 崩溃轨迹一致：SDLVideoContext->Logger::info->Logger::log->format_error）。
+# 修复：对三处 glGetString 调用加 null 守卫（`x ? x : ""`），NULL 时降级为空串，规避 fmt
+# 抛异常；glGetString 返回有效串时行为完全不变。必须在 checkout/submodule 之后、cmake 之前注入。
+SDL_VID_SRC="$(find "$SRC/library/borealis" -path '*/platforms/sdl/sdl_video.cpp' 2>/dev/null | head -n1)"
+if [ -n "$SDL_VID_SRC" ]; then
+  echo "=== [patch] fmt null 守卫：定位 sdl_video.cpp -> $SDL_VID_SRC ==="
+  if ! grep -q 'glGetString(GL_VENDOR) ?' "$SDL_VID_SRC"; then
+    sed -i -E 's@\(const char\*\)glGetString\(GL_(VENDOR|RENDERER|VERSION)\)@& ? & : ""@' "$SDL_VID_SRC"
+    echo "=== [patch] 已为 GL Vendor/Renderer/Version 三处 glGetString 调用加 null 守卫 ==="
+  else
+    echo "=== [patch] sdl_video.cpp 已含 null 守卫，跳过（幂等）==="
+  fi
+else
+  echo "WARN: 未找到 sdl_video.cpp，跳过 fmt null 守卫补丁（不影响其余构建步骤）"
+fi
+
 # 2) 配置 + 编译
 # === 窗口后端：GLFW -> SDL2（修复 Mali-G31 上建窗口失败）===
 #   根因：wiliwili 桌面默认 GLFW 后端（-DPLATFORM_DESKTOP=ON）会请求【桌面 OpenGL】
