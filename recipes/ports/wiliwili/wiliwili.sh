@@ -21,13 +21,13 @@ export LD_LIBRARY_PATH="$BIN_DIR/libs:$BIN_DIR/libs.aarch64:$LD_LIBRARY_PATH"
 # 让自打包的 Mesa（libs/ 中的 libEGL/libGL 等）使用系统 DRI 驱动
 # 系统 /usr/lib/dri 提供 rockchip_dri.so / panfrost_dri.so / kms_swrast_dri.so 等；
 # 自打包 Mesa 不含 DRI 驱动，必须指向系统路径 EGL 才能创建渲染面（否则无图像）。
-export LIBGL_DRIVERS_PATH="/usr/lib/dri"
-export MESA_DRIVERS_PATH="/usr/lib/dri"
+# export LIBGL_DRIVERS_PATH="/usr/lib/dri"
+# export MESA_DRIVERS_PATH="/usr/lib/dri"
 
 # 4. 切换到二进制目录
 cd "$BIN_DIR"
 
 # 5. 记录运行日志，便于排错
-exec >> "$BIN_DIR/log" 2>&1
+exec >> "$BIN_DIR/log.txt" 2>&1
 
 exec ./"wiliwili" "$@"
