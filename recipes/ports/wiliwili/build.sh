@@ -294,8 +294,10 @@ is_core() {
   #             gl=disabled 会令 mpv_render_context_create 失败并抛 std::logic_error → abort（即退出设置时崩溃）。
   #           - egl=disabled（关键）：mpv 用 wiliwili 提供的上下文即可，无需自建 EGL 后端；若启用 egl
   #             会让 mpv 硬链 libEGL→传递依赖 libGLdispatch.so.0，破坏纯系统 GL 路线、并在 Mali（无 GLVND
-  #             libGLdispatch）上运行期加载失败；x11/wayland/drm=disabled 关闭 GLX/桌面 GL 上下文后端，
-  #             libmpv 不会 NEEDED 桌面 libGL/libGLX/libGLdispatch，is_core 末尾校验仍应通过。
+#             libGLdispatch）上运行期加载失败；x11/wayland/drm=disabled 关闭 GLX/桌面 GL 上下文后端，
+#             libmpv 不会 NEEDED 桌面 libGL/libGLX（Mali GLES-only 无其提供方）；但【注意】libplacebo
+#             的 GLVND 链接仍可能使 libGLdispatch.so.0 残留于 DT_NEEDED——见下方"GLVND / libplacebo
+#             泄漏与 patchelf 剥离"补遗，构建后将以 patchelf 剥离，守卫仍会通过。
   #           - caca=disabled：移除 libcaca.so.0 及其 libncursesw/libtinfo 依赖。
   #           - caca=disabled：移除 libcaca.so.0（及其 libncursesw/libtinfo 依赖），消除那三行
   #             "no version information available" 版本警告，并排除 H2（libcaca 构造期崩溃）。
@@ -310,8 +312,23 @@ is_core() {
   #
   #   ⮕ 当前策略：libGL/libGLX/libGLdispatch/libEGL/libgbm 全部交还系统（纯系统 Mali GL/EGL）；
   #     Mesa GL 栈不再进入 libs/。若 BUILD_MPV_FROM_SRC 关闭（回退 apt libmpv-dev 0.32），则
-  #     libmpv 仍会硬链 libGL -> 下方 MISSING 校验会拒绝产出残包（fail loud，不静默出图异常）。
-  #
+#     libmpv 仍会硬链 libGL -> 下方 MISSING 校验会拒绝产出残包（fail loud，不静默出图异常）。
+#
+#   ⚠ 关键补遗（GLVND / libplacebo 泄漏与 patchelf 剥离，2026 构建修正）：
+#   - (a) egl=disabled【单独】并不足以消除 libGLdispatch 泄漏：mpv 的 -Degl=disabled 只关闭 mpv
+#     【自身】的 EGL 上下文后端，并不会移除 libplacebo（vo=gpu 渲染后端）在 GLVND 构建机上的 GL 后端
+#     链接（libEGL.so.1 / libGLESv2.so.2 → 传递依赖 libGLdispatch.so.0）。故即便 egl=disabled，
+#     libmpv.so / wiliwili 的 DT_NEEDED 仍可能残留 libGLdispatch.so.0（即 CI 当前失败根因）。
+#   - (b) 因此构建后追加 patchelf 后处理：对 DT_NEEDED 含 libGLdispatch.so.0 的 dist 对象执行
+#     `patchelf --remove-needed libGLdispatch.so.0` 将其剥离。之所以安全：wiliwili 以【HOST-CONTEXT】
+#     模式经 libmpv 渲染 API（mpv_render_context_create + MPV_RENDER_PARAM_OPENGL_INIT_PARAMS）把自身
+#     Mali GLES 上下文交给 mpv 渲染，mpv 不调用 GLVND 调度桩（eglGetDisplay/eglCreateContext 等），
+#     这些符号若在运行期被引用会解析到设备 Mali 的 libEGL/libGLESv2（同名 soname、非 GLVND、无
+#     libGLdispatch）。剥离后下方"纯系统 GL 路线"守卫即可通过，且不改变运行期 GL 来源。
+#   - (c) 注意 libGL.so.1 / libGLX.so.0 仍被下方"纯系统 GL 路线"守卫【拒绝】（Mali GLES-only 无其
+#     提供方）；本剥离仅针对 libGLdispatch.so.0。若 libGL/libGLX 意外泄漏，守卫照常 fail loud，
+#     不会被误剥离放行。
+#
   # ⚠ 目标固件系统库清单随固件升级需复核更新：每次 RockNIX 固件大版本升级后，应重新比对 /usr/lib，
   # 据此增删下方 SYS_LIST，避免把新版固件已提供的库误打包、或漏打包固件新缺失的库。
   case "$(basename "$1")" in
@@ -438,6 +455,36 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   exit 1
 fi
 echo "=== OK: $DEST 已包含 wiliwili 所需的全部非核心运行时库 ==="
+
+# === patchelf 后处理：剥离 libGLdispatch.so.0（GLVND 调度库）===
+# 背景（为什么必须这一步）：即便 mpv 用 -Degl=disabled 关闭了【自身】的 EGL 上下文后端，
+# libplacebo（vo=gpu 的着色器/渲染后端）在构建机（Debian mesa GLVND 环境）上仍会把其 GL 后端
+# 链到 GLVND 的 libEGL.so.1 / libGLESv2.so.2，而这两者【传递依赖】libGLdispatch.so.0。
+# 因此 dist/libmpv.so.2（连带 dist/wiliwili）的 DT_NEEDED 里仍会残留 libGLdispatch.so.0，
+# 触发下方"纯系统 GL 路线"的 ldd 校验失败（即 CI 当前失败点）。
+# 为什么【剥离安全】（HOST-CONTEXT 模式）：wiliwili 经 libmpv 渲染 API
+#（mpv_render_context_create + MPV_RENDER_PARAM_OPENGL_INIT_PARAMS）把自身 Mali GLES 上下文 +
+# get_proc_address 回调交给 mpv 渲染；mpv 在 host-context 模式下【不会】调用 GLVND 调度桩
+#（eglGetDisplay / eglCreateContext 等），这些符号即便被引用也会在运行期解析到设备 Mali 的
+# libEGL/libGLESv2（同名 soname、非 GLVND、无 libGLdispatch）。这与对照样本 wiliwili160 的
+# "纯系统 GL"行为一致，故移除 libGLdispatch NEEDED 在目标机上安全。
+# 注意：libGL.so.1 / libGLX.so.0 仍被下方"纯系统 GL 路线"守卫拒绝（Mali GLES-only 无其提供方），
+# 本循环只针对 libGLdispatch.so.0；若将来出现 libGL/libGLX 泄漏，守卫会照常 fail loud。
+if command -v patchelf >/dev/null 2>&1; then
+  for obj in dist/wiliwili dist/libs/*.so*; do
+    [ -e "$obj" ] || continue
+    # 仅当该对象确实 DT_NEEDED libGLdispatch.so.0 时才剥离，避免对无关对象误报/误删
+    if ldd "$obj" 2>/dev/null | grep -Eq 'libGLdispatch\.so'; then
+      if patchelf --remove-needed libGLdispatch.so.0 "$obj" 2>/dev/null; then
+        echo "=== patchelf: 已从 $obj 剥离 libGLdispatch.so.0（GLVND 调度，运行期由 Mali 提供）==="
+      else
+        echo "WARN: patchelf 剥离 $obj 的 libGLdispatch.so.0 失败（不中止构建，下方守卫将持续拦截）" >&2
+      fi
+    fi
+  done
+else
+  echo "WARN: 未安装 patchelf，跳过 libGLdispatch.so.0 剥离（纯系统 GL 路线守卫可能失败）" >&2
+fi
 
 # 纯系统 GL 路线强制校验：dist 内任何对象（主程序 + 全部 libs/*.so*）都不得 DT_NEEDED 桌面
 # libGL/libGLX/libGLdispatch。任一命中即拒绝产出（fail loud），确保 H1 根因（自带 Mesa libGL
