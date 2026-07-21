@@ -86,6 +86,22 @@ if _is_truthy "$BUILD_MPV_FROM_SRC"; then
 
   # 2) 构建并安装 mpv 0.36（依赖上一步安装的 ffmpeg；通过 PKG_CONFIG_PATH 发现）
   export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+  # 确保 meson >= 0.62（镜像自带 0.53.2 过旧，mpv 0.36 的 meson.build 要求 >= 0.62.0）
+  if ! command -v meson >/dev/null 2>&1 || \
+     [ "$(printf '%s\n%s\n' "$(meson --version 2>/dev/null)" "0.62.0" | sort -V | head -n1)" != "0.62.0" ]; then
+    echo "=== [optional] 升级 meson/ninja 到 >=0.62（镜像自带过旧）==="
+    pip3 install --user --upgrade "meson>=1.2,<2" ninja 2>/dev/null \
+      || python3 -m pip install --user --upgrade "meson>=1.2,<2" ninja 2>/dev/null \
+      || pip3 install --upgrade "meson>=1.2,<2" ninja
+    export PATH="$(python3 -m site --user-base)/bin:$PATH"
+    if ! command -v meson >/dev/null 2>&1 || \
+       [ "$(printf '%s\n%s\n' "$(meson --version 2>/dev/null)" "0.62.0" | sort -V | head -n1)" != "0.62.0" ]; then
+      echo "ERROR: meson 升级失败（可能缺网/缺 pip），mpv 0.36 需 >=0.62.0，当前仍 $(meson --version 2>/dev/null || echo 缺失)。" >&2
+      exit 1
+    fi
+  fi
+
   echo "=== [optional] 克隆 mpv ${MPV_TAG} ==="
   git clone --depth 1 --branch "$MPV_TAG" https://github.com/mpv-player/mpv.git "$WORK/mpv"
   pushd "$WORK/mpv" >/dev/null
