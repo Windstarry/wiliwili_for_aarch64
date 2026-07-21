@@ -51,7 +51,8 @@ if _is_truthy "$BUILD_MPV_FROM_SRC"; then
   apt-get install -y --no-install-recommends \
     python3 python3-pip meson ninja-build pkg-config git ca-certificates \
     libfreetype6-dev libopenjp2-7-dev libmp3lame-dev libvorbis-dev libvpx-dev \
-    libplacebo-dev libass-dev libsdl2-dev || true
+    libplacebo-dev libass-dev libsdl2-dev \
+    libegl-dev libgles2-mesa-dev || true
   # 编解码必需/可选的外部库（缺失则 ffmpeg 回退到最简配置）
   apt-get install -y --no-install-recommends libx264-dev libx265-dev || true
 
@@ -105,8 +106,31 @@ if _is_truthy "$BUILD_MPV_FROM_SRC"; then
   echo "=== [optional] 克隆 mpv ${MPV_TAG} ==="
   git clone --depth 1 --branch "$MPV_TAG" https://github.com/mpv-player/mpv.git "$WORK/mpv"
   pushd "$WORK/mpv" >/dev/null
-    # 纯系统 GL 路线：禁用桌面 GL（去掉 libGL 硬链；wiliwili 用自身 EGL/GLES 上下文经
-    # libmpv 渲染 API 出图，mpv 自带 GLX/EGL 上下文后端本就未使用）+ 禁用 caca（去 ncurses 依赖）。
+    # 纯系统 GL 路线（修正）：mpv 必须以 GL 渲染后端构建，wiliwili 才能经 libmpv 渲染 API
+    #（mpv_render_context_create + MPV_RENDER_PARAM_OPENGL_INIT_PARAMS）把自身 GLES 上下文
+    #（borealis/SDL2 经系统 Mali EGL 创建）交给 mpv 做解码+着色器渲染。
+    # - gl=enabled + plain-gl=enabled：启用 mpv GPU 渲染器（vo=gpu）与 libmpv 渲染 API；plain-gl
+    #   不拉桌面 libGL（仅启用渲染器特性），避免 NEEDED 桌面 libGL.so.1/libGLX.so/libGLdispatch.so。
+    #   gl=disabled 会令 mpv_render_context_create 失败并抛 std::logic_error("failed to initialize
+    #   mpv GL context") → abort（即退出设置时崩溃）。
+    # - 刻意 egl=disabled：不启用 mpv 自带 EGL 上下文后端。wiliwili 经 libmpv 渲染 API 把自身
+    #   GLES 上下文交给 mpv 渲染，mpv 用宿主机提供的上下文即可；启用 egl 会让 mpv 硬链 libEGL
+    #   → 传递依赖 libGLdispatch.so.0，破坏纯系统 GL 路线并在 Mali 上运行期加载失败。
+    # - x11=disabled / wayland=disabled / drm=disabled：关闭 GLX/桌面 GL 上下文后端（避免 libGL
+    #   硬链），libmpv 只经 EGL 链系统 Mali libEGL，纯系统 GL 路线不变，is_core 末尾校验仍应通过。
+    # - caca=disabled：去 libcaca/ncurses 依赖。
+    # MPV_VIDEO_BACKEND 开关：默认 gl（启用 mpv GPU 渲染器 vo=gpu + libmpv 渲染 API，
+    # 经 plain-gl 仅开渲染器特性、不拉桌面 libGL）；设 legacy 退回旧 gl=disabled（会崩，勿默认）。
+    # 注意：刻意【不】启用 mpv 自带 egl 上下文后端（egl=disabled）——wiliwili 经渲染 API 把自身
+    # GLES 上下文交给 mpv，mpv 用宿主机提供的上下文即可，无需 mpv 自建 EGL；启用 egl 会让 mpv
+    # 硬链 libEGL→传递依赖 libGLdispatch.so.0，既破坏纯系统 GL 路线、又会在 Mali（无 GLVND
+    # libGLdispatch）上运行期加载失败。故 egl=disabled 是正确且安全的选择。
+    MPV_VIDEO_BACKEND="${MPV_VIDEO_BACKEND:-gl}"
+    if [ "$MPV_VIDEO_BACKEND" = "gl" ]; then
+      MPV_GL_OPTS="-Dgl=enabled -Dplain-gl=enabled -Dx11=disabled -Dwayland=disabled -Dcaca=disabled -Ddrm=disabled"
+    else
+      MPV_GL_OPTS="-Dgl=disabled -Dcaca=disabled"
+    fi
     meson setup build \
       --prefix=/usr/local \
       -Dbuildtype=release \
@@ -116,8 +140,7 @@ if _is_truthy "$BUILD_MPV_FROM_SRC"; then
       -Dlua=disabled \
       -Djavascript=disabled \
       -Diconv=disabled \
-      -Dgl=disabled \
-      -Dcaca=disabled \
+      $MPV_GL_OPTS \
       || { echo "ERROR: mpv meson setup 失败，请检查 libass/libplacebo 等依赖。" >&2; exit 1; }
     meson compile -C build -j"$(nproc)" \
       || { echo "ERROR: mpv 编译失败。" >&2; exit 1; }
@@ -262,11 +285,18 @@ is_core() {
   #   且打包集合里【没有任何库 DT_NEEDED 桌面 libGL】（否则加载即触发 H1 预 main 挂起）。
   #   实现方式（对齐实机对照样本 wiliwili160 的纯系统 GL 路线）：
   #   - 开启 BUILD_MPV_FROM_SRC，从源码构建 mpv 0.36 + ffmpeg 6，并：
-  #       · mpv meson: -Dgl=disabled -Dcaca=disabled
-  #           - gl=disabled：移除 mpv 的 GLX/EGL 上下文后端及其对 libGL.so.1 的硬链接。
-  #             wiliwili 通过 libmpv 渲染 API（mpv_render_context）把自身 EGL/GLES（系统 Mali）
-  #             上下文交给 mpv 做解码+着色器渲染，mpv 自身的 vo=gpu 上下文后端本就未被使用，
-  #             故禁用 gl 不影响出图，反而彻底去掉 libGL 依赖（修复 H1）。
+  #       · mpv meson: 默认 MPV_VIDEO_BACKEND=gl ⇒
+  #           -Dgl=enabled -Dplain-gl=enabled -Dx11=disabled -Dwayland=disabled -Dcaca=disabled -Ddrm=disabled
+  #           （刻意 egl=disabled：不启用 mpv 自带 EGL 上下文后端）
+  #           - gl=enabled + plain-gl=enabled：启用 mpv GPU 渲染器（vo=gpu）与 libmpv 渲染 API
+  #             （mpv_render_context）；plain-gl 仅开渲染器特性、不拉桌面 libGL。wiliwili 经渲染 API
+  #             把自身 EGL/GLES（系统 Mali）上下文交给 mpv 做解码+着色器渲染，正依赖此 GL 渲染后端；
+  #             gl=disabled 会令 mpv_render_context_create 失败并抛 std::logic_error → abort（即退出设置时崩溃）。
+  #           - egl=disabled（关键）：mpv 用 wiliwili 提供的上下文即可，无需自建 EGL 后端；若启用 egl
+  #             会让 mpv 硬链 libEGL→传递依赖 libGLdispatch.so.0，破坏纯系统 GL 路线、并在 Mali（无 GLVND
+  #             libGLdispatch）上运行期加载失败；x11/wayland/drm=disabled 关闭 GLX/桌面 GL 上下文后端，
+  #             libmpv 不会 NEEDED 桌面 libGL/libGLX/libGLdispatch，is_core 末尾校验仍应通过。
+  #           - caca=disabled：移除 libcaca.so.0 及其 libncursesw/libtinfo 依赖。
   #           - caca=disabled：移除 libcaca.so.0（及其 libncursesw/libtinfo 依赖），消除那三行
   #             "no version information available" 版本警告，并排除 H2（libcaca 构造期崩溃）。
   #       · ffmpeg configure: --disable-opengl，去掉 libavdevice.so 对桌面 libGL 的链接。
@@ -423,7 +453,7 @@ for obj in dist/wiliwili dist/libs/*.so*; do
   fi
 done
 if [ "$GL_BAD" -ne 0 ]; then
-  echo "ERROR: 存在 libGL 依赖，拒绝产出。请确认 mpv -Dgl=disabled 与 ffmpeg --disable-opengl 已生效。" >&2
+  echo "ERROR: 存在桌面 libGL 依赖，拒绝产出。请确认 mpv GL 渲染后端经 plain-gl 启用（gl=enabled plain-gl=enabled，egl=disabled 避免硬链 libEGL）、x11=disabled（GL 走渲染器而非 GLX）且 ffmpeg --disable-opengl 已生效。" >&2
   exit 1
 fi
 echo "=== OK: dist 内无任何桌面 libGL 依赖（纯系统 GL 路线校验通过）==="
