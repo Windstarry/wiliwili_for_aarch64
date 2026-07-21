@@ -16,12 +16,17 @@ REF="${WILIWILI_REF:-master}"
 git -C "$SRC" checkout "$REF"
 git -C "$SRC" submodule update --init --recursive
 
-# 1) 安装构建依赖（镜像已含 webp/gl/egl/openssl/zlib，仅需补 mpv + x11 dev）
+# 1) 安装构建依赖（镜像已含 webp/gl/egl/openssl/zlib，仅需补 mpv + x11 + sdl2 dev）
 apt-get update
 apt-get install -y --no-install-recommends \
   libmpv-dev libwebp-dev libssl-dev zlib1g-dev \
   libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-  libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libcurl4-openssl-dev pkg-config
+  libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libcurl4-openssl-dev pkg-config \
+  libsdl2-dev
+# libsdl2-dev: SDL2 窗口后端必需。本机 Mali-G31 仅 GLES-only，GLFW 默认请求
+#   桌面 OpenGL 上下文 -> 建窗口失败（glfw: Failed to create window，进程 abort）；
+#   改用 -DUSE_SDL2=ON 后端后，SDL2 在 Mali 上经 EGL→系统 Mali libEGL/libgbm 正常
+#   出图（同实机样本 wiliwili160 的 SDL2 后端实证，GL: Mali-G31 / ES 3.2）。
 # patchelf 作为双保险（可选，缺失不致命）
 apt-get install -y --no-install-recommends patchelf || true
 
@@ -112,6 +117,19 @@ else
 fi
 
 # 2) 配置 + 编译
+# === 窗口后端：GLFW -> SDL2（修复 Mali-G31 上建窗口失败）===
+#   根因：wiliwili 桌面默认 GLFW 后端（-DPLATFORM_DESKTOP=ON）会请求【桌面 OpenGL】
+#   上下文；而本机 RockNIX + Mali-G31 Bifrost（闭源 DDK r52p0）是【GLES-only】设备，
+#   Mali 无法提供桌面 GL -> GLFW 建上下文/窗口失败 -> 进程抛 std::logic_error
+#   "glfw: Failed to create window" 直接 abort（用户 log.txt 实证；旧版仅黑屏，现已升级为崩溃）。
+#   对照样本 wiliwili160（同设备完整出图、干净退出）使用【SDL2 后端】，其运行时打印
+#   "Using platform SDL"，且 GL 信息同为 Mali-G31 / OpenGL ES 3.2（ARM），证明 SDL2 后端
+#   能在 Mali GLES 上正常出图、GLFW 不能。
+#   故在保留 -DPLATFORM_DESKTOP=ON 的同时追加 -DUSE_SDL2=ON 切到 SDL2 窗口后端：
+#   SDL2 在本机自动选择 Wayland/X11，经 EGL 走系统 Mali libEGL/libgbm 渲染 -> 出图；
+#   SDL2 后端与现有 GL 打包策略（libGL 三件套自打包、libEGL/libgbm 交还系统）完全契合。
+#   注：USE_SDL2 为 wiliwili 既有选项（上游文档确认；当前 WILIWILI_REF=yoga 分支支持），
+#   仅需在容器里能 find_package(SDL2) 找到头文件/库（已在上一步 apt 安装 libsdl2-dev）。
 # aarch64 优化参数：沿用 PortMaster 镜像自带 aarch64-linux-gnu 工具链，不引用任何外部 SDK/sysroot。
 # 借鉴 dragonflylee/trimui-port 的微架构基线（Cortex-A53）：以 -march=armv8-a 通用 ISA 为底线
 # （A53/A55/A72 全兼容，绝不 SIGILL），-mtune=cortex-a53 仅做指令调度调优（不改 ISA）。
@@ -119,6 +137,7 @@ fi
 # 通过 cmake 命令行 -DCMAKE_C_FLAGS/-DCMAKE_CXX_FLAGS 注入（cmake 标准全局传参方式；wiliwili 为常规 CMake 项目、以追加式书写 CMAKE_CXX_FLAGS，本注入稳定生效，且高于 CXXFLAGS 环境变量优先级）。
 cmake -B build \
   -DPLATFORM_DESKTOP=ON \
+  -DUSE_SDL2=ON \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_FLAGS="-pipe -fomit-frame-pointer -march=armv8-a -mtune=cortex-a53 -ffunction-sections -fdata-sections" \
   -DCMAKE_CXX_FLAGS="-pipe -fomit-frame-pointer -march=armv8-a -mtune=cortex-a53 -ffunction-sections -fdata-sections" \
