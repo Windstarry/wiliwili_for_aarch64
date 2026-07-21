@@ -19,13 +19,24 @@ fi
 
 # --- 测试用例: "soname|期望返回值(0=不打包交系统 / 1=打包)" ---
 # 注意: is_core 内部对入参做 basename，这里直接用 soname 名本身调用即可
+# 2026-07-21 更新: 与 build.sh 当前策略对齐 ——
+#   1) 纯系统 GL 路线: libGL/libGLX/libGLdispatch/libEGL/libgbm 全部交系统 (return 0)；
+#      (原脚本曾按"自打包 Mesa GL"旧策略期望 return 1，已随 build.sh 改为纯系统 GL 而修正)
+#   2) libbz2/liblzma/libzstd 缺失修复: 已从排除清单移除，改为自包含打包 (return 1)；
+#   3) 负向对照 libz.so.1 仍交系统 (return 0)，证明仅 compression 子集被改、zlib 未误伤。
 declare -a CASES=(
-  "libGL.so.1|1"          # 5 个 mesa GL 栈 -> 应打包(return 1)
-  "libGLX.so.0|1"
-  "libGLdispatch.so.0|1"
-  "libEGL.so.1|1"
-  "libgbm.so.1|1"
+  # 纯系统 GL 路线 (当前 build.sh 策略): Mesa GL 栈全部交还系统
+  "libGL.so.1|0"          # 纯系统 GL: 交系统(return 0)
+  "libGLX.so.0|0"
+  "libGLdispatch.so.0|0"
+  "libEGL.so.1|0"
+  "libgbm.so.1|0"
+  # libbz2/liblzma/libzstd 缺失修复: 改为自包含打包(return 1)
+  "libbz2.so.1.0|1"       # 核心修复: libbz2 必须打包
+  "liblzma.so.5|1"        # 同族修复: liblzma 必须打包
+  "libzstd.so.1|1"        # 同族修复: libzstd 必须打包
   "libmpv.so.1|1"         # mpv -> 应打包(return 1)
+  "libz.so.1|0"           # 负向对照: zlib 仍交系统(修复未误伤)
   "libX11.so.6|0"         # 对照组 -> 不打包(return 0)
   "libSDL2-2.0.so.0|0"
   "libwayland-client.so.0|0"

@@ -263,6 +263,9 @@ is_core() {
     # 排除清单（命中则 return 0 不打包，交给系统）：核心运行时库 + libwayland 全族 + 2026-07-20
     # RockNIX 实机审计的 90 个系统已有 soname（按 X11/xcb、SDL/GL/EGL/DRM、GLib/GTK/Pango/Cairo、
     # 声音/多媒体、samba/heimdal/ndr、压缩/加密/系统基础 分组，详见上方 is_core 注释）。
+    # 注意：libbz2/liblzma/libzstd 已从排除清单移除并改为打包——源码构建的 ffmpeg 6 默认自动链接
+    # 这三者（bzlib/xz/zstd），而目标 RockNIX 固件未必提供，2026-07-20 审计的"系统已有"假设在此
+    # 不成立；改为自包含打包，避免运行时 'cannot open shared object file: libbz2.so.1' 类缺库错误。
     libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libgcc_s.so*|\
     libstdc++.so*|ld-linux-*|linux-vdso.so*|libutil.so*|libresolv.so*|\
     libBrokenLocale.so*|libmvec.so*|libnsl.so*|libpcprofile.so*|\
@@ -282,7 +285,7 @@ is_core() {
     libsamba-errors.so*|libsamba-util.so*|libsmbclient.so*|libsmbconf.so*|\
     libwbclient.so*|libndr-krb5pac.so*|libndr-nbt.so*|libndr-standard.so*|\
     libtalloc.so*|libdcerpc-binding.so*|\
-    libz.so*|libzstd.so*|libbz2.so*|liblzma.so*|libexpat.so*|libfreetype.so*|\
+    libz.so*|libexpat.so*|libfreetype.so*|\
     libfontconfig.so*|libpng16.so*|libjpeg.so*|liblcms2.so*|libgcrypt.so*|\
     libgpg-error.so*|libgmp.so*|libgnutls.so*|libidn2.so*|libsqlite3.so*|\
     libsystemd.so*|libudev.so*|libusb-1.0.so*|libdbus-1.so*|libblkid.so*|\
