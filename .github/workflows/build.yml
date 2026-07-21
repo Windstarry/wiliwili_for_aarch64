@@ -11,9 +11,12 @@ env:
   WILIWILI_REPO: https://github.com/Windstarry/wiliwili.git
   # 源码版本：默认 master。可指定 tag / commit / 分支名，例如 v1.4.0 或 a1b2c3d
   WILIWILI_REF: yoga
-  # 可选：从源码构建 mpv 0.36 + ffmpeg 6（默认空 = 沿用 apt 的 libmpv-dev 0.32）。
-  # 设为任意真值（如 "1" / "true"）可开启源码构建路径。
-  BUILD_MPV_FROM_SRC: ''
+  # 纯系统 GL 路线（默认开启源码构建）：apt 的 libmpv-dev 0.32 会硬链桌面 libGL，
+  # 而系统 libGL 损坏（file too short）、打包 Mesa libGL 又会预 main 挂起（H1）。故默认
+  # 开启 BUILD_MPV_FROM_SRC，从源码构建 mpv( -Dgl=disabled -Dcaca=disabled ) + ffmpeg
+  # ( --disable-opengl )，产出 EGL-only、无 libGL 依赖的 libmpv/libavdevice，与 wiliwili160
+  # 纯系统 GL 路线对齐。设为空/false 则回退 apt 旧路径（MISSING 校验会拒绝残包）。
+  BUILD_MPV_FROM_SRC: 'on'
 jobs:
   build:
     name: Build aarch64 Binary

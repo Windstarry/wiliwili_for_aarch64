@@ -69,9 +69,11 @@ if _is_truthy "$BUILD_MPV_FROM_SRC"; then
          --enable-libmp3lame --enable-libvorbis --enable-libvpx \
          --enable-libx264 --enable-libx265 \
          --enable-postproc --enable-small --enable-openssl --enable-pthreads --enable-zlib \
+         --disable-opengl \
          --disable-doc --disable-programs 2>/dev/null; then
       echo "WARN: ffmpeg 完整 configure 失败，回退到最简 --enable-shared 配置"
       ./configure --prefix=/usr/local --enable-shared --enable-pic \
+        --disable-opengl \
         --disable-doc --disable-programs \
         || { echo "ERROR: ffmpeg configure 失败，请检查构建依赖。" >&2; exit 1; }
     fi
@@ -87,6 +89,8 @@ if _is_truthy "$BUILD_MPV_FROM_SRC"; then
   echo "=== [optional] 克隆 mpv ${MPV_TAG} ==="
   git clone --depth 1 --branch "$MPV_TAG" https://github.com/mpv-player/mpv.git "$WORK/mpv"
   pushd "$WORK/mpv" >/dev/null
+    # 纯系统 GL 路线：禁用桌面 GL（去掉 libGL 硬链；wiliwili 用自身 EGL/GLES 上下文经
+    # libmpv 渲染 API 出图，mpv 自带 GLX/EGL 上下文后端本就未使用）+ 禁用 caca（去 ncurses 依赖）。
     meson setup build \
       --prefix=/usr/local \
       -Dbuildtype=release \
@@ -97,6 +101,8 @@ if _is_truthy "$BUILD_MPV_FROM_SRC"; then
       -Dlua=disabled \
       -Djavascript=disabled \
       -Diconv=disabled \
+      -Dgl=disabled \
+      -Dcaca=disabled \
       || { echo "ERROR: mpv meson setup 失败，请检查 libass/libplacebo 等依赖。" >&2; exit 1; }
     meson compile -C build -j"$(nproc)" \
       || { echo "ERROR: mpv 编译失败。" >&2; exit 1; }
@@ -211,24 +217,30 @@ is_core() {
   # 排除、不出现在部署 libs/ 中，故审计比对无从命中），但系统确已有之，仍需显式排除，否则会
   # 重新引入 wl_proxy_marshal_flags 等缺失；libxkbcommon.so.0 本身已进 SYS_LIST。
   #
-  # === GPU/mesa GL 栈（libGL/libGLX/libGLdispatch/libEGL/libgbm）打包策略：部分 revert ===
-  #   实机 RockNIX（PX30 + Mali-G31 Bifrost，封闭 Mali DDK r52p0）的 /usr/lib/libGL.so.1 当前
-  #   损坏（file too short：悬空符号链接或截断文件），故 libGL/libGLX/libGLdispatch 三件套仍由
-  #   构建机镜像打包（自包含 Mesa GL 客户端栈），以满足 libmpv.so.1 与 libavdevice.so.58 对
-  #   libGL.so.1 的硬链接；一旦委托系统，加载即报 "libGL.so.1: file too short" 崩溃。
+  # === GPU/mesa GL 栈（libGL/libGLX/libGLdispatch/libEGL/libgbm）打包策略：纯系统 GL 路线 ===
+  #   目标：运行时 GL/EGL 全部来自系统 Mali DDK，libs/ 中【不再打包任何 Mesa GL 栈】，
+  #   且打包集合里【没有任何库 DT_NEEDED 桌面 libGL】（否则加载即触发 H1 预 main 挂起）。
+  #   实现方式（对齐实机对照样本 wiliwili160 的纯系统 GL 路线）：
+  #   - 开启 BUILD_MPV_FROM_SRC，从源码构建 mpv 0.36 + ffmpeg 6，并：
+  #       · mpv meson: -Dgl=disabled -Dcaca=disabled
+  #           - gl=disabled：移除 mpv 的 GLX/EGL 上下文后端及其对 libGL.so.1 的硬链接。
+  #             wiliwili 通过 libmpv 渲染 API（mpv_render_context）把自身 EGL/GLES（系统 Mali）
+  #             上下文交给 mpv 做解码+着色器渲染，mpv 自身的 vo=gpu 上下文后端本就未被使用，
+  #             故禁用 gl 不影响出图，反而彻底去掉 libGL 依赖（修复 H1）。
+  #           - caca=disabled：移除 libcaca.so.0（及其 libncursesw/libtinfo 依赖），消除那三行
+  #             "no version information available" 版本警告，并排除 H2（libcaca 构造期崩溃）。
+  #       · ffmpeg configure: --disable-opengl，去掉 libavdevice.so 对桌面 libGL 的链接。
+  #   - 因此 libmpv.so / libavdevice.so 均不再 NEEDED libGL，下方排除清单可安全把
+  #     libGL/libGLX/libGLdispatch 也交还系统（与 libEGL/libgbm 一致），libs/ 中不再含任何 Mesa GL。
   #
-  #   但 libEGL.so* 与 libgbm.so* 必须【交还系统】（重新列入下方排除清单），原因：
-  #   - no-image 根因：自打包的 Mesa libEGL/libgbm 经 LD_LIBRARY_PATH 优先遮蔽了设备系统 Mali
-  #     DDK 提供的 libEGL/libgbm；Mesa EGL 无法在 Mali GPU 上创建渲染面 → 黑屏无图。
-  #   - 实机对照样本 wiliwili160（/roms/ports/wiliwili160，纯系统 GL）GL 信息实证：
-  #       GL Vendor: ARM / Renderer: Mali-G31 / GL ES 3.2 —— 证明系统 Mali 栈可正常出图。
-  #   - 交还系统后，SDL2/EGL 显示面改用系统 Mali libEGL/libgbm 渲染 → 出图；
-  #     而 libmpv/libavdevice 硬链接的 libGL 仍解析到打包的合法 Mesa libGL → 不触发损坏系统 libGL。
-  #   - 硬链接校验（GL_HARDLINK_CHECK.md）：仅 libmpv.so.1 与 libavdevice.so.58 硬链接 libGL.so.1；
-  #     libEGL/libgbm 仅被 libmpv.so.1 硬链接，交还系统后回退到有效 Mali 版本，无崩溃风险。
+  #   历史（已废弃的旧策略，留作对照）：此前因系统 /usr/lib/libGL.so.1 损坏（file too short），
+  #   曾把 libGL 三件套自打包以避崩溃；但自打包 Mesa libGL 经 LD_LIBRARY_PATH 优先遮蔽系统 Mali
+  #   libEGL/libgbm 会黑屏（no-image），交还 libEGL/libgbm 后 libGL 仍由 Mesa 提供 -> 触发 H1 预
+  #   main 挂起。现改为"源码构建 EGL-only mpv/ffmpeg + 完全不打包 Mesa GL"，从根上消除该错配。
   #
-  #   ⮕ 当前策略：libGL/libGLX/libGLdispatch 打包（避 file-too-short），libEGL/libgbm 交系统（修 no-image）。
-  #     若日后固件修复系统 libGL，可再把 libGL 三件套也交还系统，彻底与 wiliwili160 对齐。
+  #   ⮕ 当前策略：libGL/libGLX/libGLdispatch/libEGL/libgbm 全部交还系统（纯系统 Mali GL/EGL）；
+  #     Mesa GL 栈不再进入 libs/。若 BUILD_MPV_FROM_SRC 关闭（回退 apt libmpv-dev 0.32），则
+  #     libmpv 仍会硬链 libGL -> 下方 MISSING 校验会拒绝产出残包（fail loud，不静默出图异常）。
   #
   # ⚠ 目标固件系统库清单随固件升级需复核更新：每次 RockNIX 固件大版本升级后，应重新比对 /usr/lib，
   # 据此增删下方 SYS_LIST，避免把新版固件已提供的库误打包、或漏打包固件新缺失的库。
@@ -245,7 +257,7 @@ is_core() {
     libXi.so*|libXinerama.so*|libXrandr.so*|libXrender.so*|libXss.so*|libXxf86vm.so*|\
     libxcb.so*|libxcb-render.so*|libxcb-shape.so*|libxcb-shm.so*|libxcb-xfixes.so*|\
     libSDL2-2.0.so*|\
-    libvdpau.so*|libdrm.so*|libdrm_*.so*|libEGL.so*|libgbm.so*|\
+    libvdpau.so*|libdrm.so*|libdrm_*.so*|libEGL.so*|libgbm.so*|libGL.so*|libGLX.so*|libGLdispatch.so*|\
     libglib-2.0.so*|libgobject-2.0.so*|libgmodule-2.0.so*|libgio-2.0.so*|\
     libcairo.so*|libcairo-gobject.so*|libpango-1.0.so*|libpangocairo-1.0.so*|\
     libpangoft2-1.0.so*|libgdk_pixbuf-2.0.so*|libpixman-1.so*|libthai.so*|\
@@ -353,6 +365,25 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   exit 1
 fi
 echo "=== OK: $DEST 已包含 wiliwili 所需的全部非核心运行时库 ==="
+
+# 纯系统 GL 路线强制校验：dist 内任何对象（主程序 + 全部 libs/*.so*）都不得 DT_NEEDED 桌面
+# libGL/libGLX/libGLdispatch。任一命中即拒绝产出（fail loud），确保 H1 根因（自带 Mesa libGL
+# 预 main 挂起）不会随残包流出。CI 默认 BUILD_MPV_FROM_SRC=on，此步即团队要求的 ldd 验证。
+echo "=== 校验：纯系统 GL 路线 —— dist 内不得有任何桌面 libGL 依赖 ==="
+GL_BAD=0
+for obj in dist/wiliwili dist/libs/*.so*; do
+  [ -e "$obj" ] || continue
+  if ldd "$obj" 2>/dev/null | grep -Eq 'libGL\.so|libGLX\.so|libGLdispatch\.so'; then
+    echo "ERROR: $obj 仍依赖桌面 libGL（违反纯系统 GL 路线）：" >&2
+    ldd "$obj" 2>/dev/null | grep -E 'libGL\.so|libGLX\.so|libGLdispatch\.so' >&2
+    GL_BAD=1
+  fi
+done
+if [ "$GL_BAD" -ne 0 ]; then
+  echo "ERROR: 存在 libGL 依赖，拒绝产出。请确认 mpv -Dgl=disabled 与 ffmpeg --disable-opengl 已生效。" >&2
+  exit 1
+fi
+echo "=== OK: dist 内无任何桌面 libGL 依赖（纯系统 GL 路线校验通过）==="
 
 tar -czf "/workspace/wiliwili-linux-${ARCH}.tar.gz" -C dist .
 echo "=== done: /workspace/wiliwili-linux-${ARCH}.tar.gz ==="
