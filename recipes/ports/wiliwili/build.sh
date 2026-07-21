@@ -170,6 +170,31 @@ else
   echo "WARN: 未找到 sdl_video.cpp，跳过 fmt null 守卫补丁（不影响其余构建步骤）"
 fi
 
+# === 防御性补丁：Mali-G31 GLES-only 强制走 GLES 上下文（修复 SIGSEGV）===
+# 根因：borealis 在 PLATFORM_DESKTOP Linux SDL2 构建下，默认走桌面 OpenGL CORE
+# profile（sdl_video.cpp 的 #else 分支：SDL_GL_CONTEXT_PROFILE_CORE + GL 3.2）。
+# Mali-G31 是 GLES-only，建出坏上下文 -> glGetString 返回 NULL（实机三行 GL 日志
+# 全空）-> 首个真实 GL 调用 NULL fnptr -> SIGSEGV。对照样本 wiliwili160 同机能出图
+# （GL Version=OpenGL ES 3.2），是因为它走了 GLES profile 路径。
+# 修复：borealis 的 commonOption.cmake 声明了 USE_GLES3 选项，但桌面分支未
+# add_definitions，故 USE_GLES3 宏从未定义、永远走 CORE 分支。给 borealis target
+# 追加 PUBLIC -DUSE_GLES3，让 sdl_video.cpp 走 USE_GLES3 分支
+# （SDL_GL_CONTEXT_PROFILE_ES + GLES3 nanovg 实现），与 wiliwili160 行为一致；
+# PUBLIC 使 wiliwili 也继承该宏。borealis 的 PS4 分支硬编码 -DUSE_GLES2 用同一
+# bundled glad，证明 glad 支持 GLES，故 GLES3 可用。
+BRLS_CMAKE="$(find "$SRC/library/borealis" -path '*/library/CMakeLists.txt' 2>/dev/null | head -n1)"
+if [ -n "$BRLS_CMAKE" ]; then
+  echo "=== [patch] USE_GLES3：定位 borealis library/CMakeLists.txt -> $BRLS_CMAKE ==="
+  if ! grep -qF 'target_compile_options(borealis PUBLIC -DUSE_GLES3)' "$BRLS_CMAKE"; then
+    printf '\ntarget_compile_options(borealis PUBLIC -DUSE_GLES3) # [wiliwili-aarch64] Mali GLES-only: force ES context\n' >> "$BRLS_CMAKE"
+    echo "=== [patch] 已向 borealis 追加 PUBLIC -DUSE_GLES3 ==="
+  else
+    echo "=== [patch] borealis 已含 USE_GLES3，跳过（幂等）==="
+  fi
+else
+  echo "WARN: 未找到 borealis library/CMakeLists.txt，跳过 USE_GLES3 补丁（不影响其余构建步骤）"
+fi
+
 # 2) 配置 + 编译
 # === 窗口后端：GLFW -> SDL2（修复 Mali-G31 上建窗口失败）===
 #   根因：wiliwili 桌面默认 GLFW 后端（-DPLATFORM_DESKTOP=ON）会请求【桌面 OpenGL】
