@@ -28,6 +28,6 @@ export LD_LIBRARY_PATH="$BIN_DIR/libs:$BIN_DIR/libs.aarch64:$LD_LIBRARY_PATH"
 cd "$BIN_DIR"
 
 # 5. 记录运行日志，便于排错
-exec >> "$BIN_DIR/log.txt" 2>&1
+> "$BIN_DIR/log.txt" && exec > >(tee "$BIN_DIR/log.txt") 2>&1
 
-exec ./"wiliwili" "$@"
+./wiliwili "$@"

@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
+    branches: ['main']
 permissions:
   contents: write
 env:
@@ -13,13 +14,13 @@ env:
   WILIWILI_REF: yoga
   # 纯系统 GL 路线（默认开启源码构建）：apt 的 libmpv-dev 0.32 会硬链桌面 libGL，
   # 而系统 libGL 损坏（file too short）、打包 Mesa libGL 又会预 main 挂起（H1）。故默认
-  # 开启 BUILD_MPV_FROM_SRC，从源码构建 mpv( -Dgl=disabled -Dcaca=disabled ) + ffmpeg
+  # 开启 BUILD_MPV_FROM_SRC，从源码构建 mpv( gl=enabled plain-gl=enabled egl=disabled ) + ffmpeg
   # ( --disable-opengl )，产出 EGL-only、无 libGL 依赖的 libmpv/libavdevice，与 wiliwili160
   # 纯系统 GL 路线对齐。设为空/false 则回退 apt 旧路径（MISSING 校验会拒绝残包）。
   BUILD_MPV_FROM_SRC: 'on'
 jobs:
   build:
-    name: Build aarch64 Binary
+    name: Build & Package PortMaster
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout (port repo)
@@ -34,32 +35,24 @@ jobs:
             -e WILIWILI_REF="$WILIWILI_REF" \
             -e BUILD_MPV_FROM_SRC="$BUILD_MPV_FROM_SRC" \
             ${{ env.IMAGE }} /bin/bash -c "bash recipes/ports/wiliwili/build.sh aarch64"
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wiliwili-linux-aarch64
-          path: wiliwili-linux-aarch64.tar.gz
-          retention-days: 7
-  package:
-    name: Package PortMaster
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: wiliwili-linux-aarch64
-          path: artifacts
       - name: Assemble PortMaster port
         run: |
+          # 目录结构：wiliwili-portmaster/  (zip 根)
+          #   ├── wiliwili.sh          (启动器，置于内层 wiliwili/ 之外)
+          #   └── wiliwili/            (内层目录)
+          #       ├── wiliwili         (二进制)
+          #       ├── libs/            (运行时库)
+          #       ├── port.json
+          #       └── wiliwili.png     (图标，置于内层 wiliwili/ 之内)
           mkdir -p ports/wiliwili/wiliwili
-          tar -xzf artifacts/wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/wiliwili/
+          tar -xzf wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/wiliwili/
           cp recipes/ports/wiliwili/port.json ports/wiliwili/wiliwili/port.json
-          cp recipes/ports/wiliwili/wiliwili.sh ports/wiliwili/wiliwili/wiliwili.sh
-          cp recipes/ports/wiliwili/wiliwili.png ports/wiliwili/wiliwili.png
-          chmod +x ports/wiliwili/wiliwili/wiliwili.sh
+          cp recipes/ports/wiliwili/wiliwili.sh ports/wiliwili/wiliwili.sh
+          cp recipes/ports/wiliwili/wiliwili.png ports/wiliwili/wiliwili/wiliwili.png
+          chmod +x ports/wiliwili/wiliwili.sh
           cd ports/wiliwili && zip -r ../../wiliwili.zip .
-      - uses: actions/upload-artifact@v4
+      - name: Upload portmaster artifact
+        uses: actions/upload-artifact@v4
         with:
           name: wiliwili-portmaster
           path: wiliwili.zip
@@ -67,17 +60,25 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: package
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: wiliwili-portmaster
           path: release
-      - name: Publish
+      - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           files: release/wiliwili.zip
+          # v* tag 推送 -> 以 tag 名为正式 Release；其余 push -> 覆盖式 nightly prerelease
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'nightly' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Nightly Build' }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          overwrite: true
+          body: |
+            Automated build from ${{ github.sha }}
+            - Source ref: ${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
