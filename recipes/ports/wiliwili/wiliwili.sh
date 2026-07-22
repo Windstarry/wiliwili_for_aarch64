@@ -30,4 +30,4 @@ cd "$BIN_DIR"
 # 5. 记录运行日志，便于排错
 > "$BIN_DIR/log.txt" && exec > >(tee "$BIN_DIR/log.txt") 2>&1
 
-./wiliwili "$@"
+./wiliwili
