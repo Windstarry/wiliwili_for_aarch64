@@ -5,6 +5,219 @@ SRC="${SOURCE_DIR:-.}"
 echo "=== wiliwili ${ARCH} build (arch=${ARCH}, src=${SRC}) ==="
 cd "$SRC"
 
+# ---------------------------------------------------------------------------
+# TrimUi TG5040 / PowerVR GE8300 交叉构建入口
+#   - 默认 TARGET=rocknix：沿用下方原有 RockNIX (Mali-G31) 线性构建流程，逐字节不变。
+#   - TARGET=tg5040：调用 build_tg5040（Allwinner A133P + PowerVR GE8300 路径）。
+# 注意：build_tg5040 在 ubuntu-latest runner 直接运行（无 docker、无 /workspace 挂载），
+# 其产物 tar 包以相对名 wiliwili-linux-${ARCH}.tar.gz 落到仓库根目录，供下方 Assemble 步骤解包。
+# ---------------------------------------------------------------------------
+RECIPE_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ---------------------------------------------------------------------------
+# TrimUi TG5040 (Allwinner A133P + PowerVR GE8300) 交叉构建路径
+# 背景：目标机 TinaLinux + PowerVR GE8300，厂商 SDL2 的 mali 视频后端与 PowerVR
+# EGL/WSEGL 不兼容，运行期早期 SIGSEGV。本路径改用随仓库附的 SDL2-2.26.1.GE8300
+# （PowerVR 适配），经官方 trimui SDK sysroot 交叉编译，产出不依赖厂商 mali SDL2 的 wiliwili。
+# 构建机：ubuntu-latest (x86_64) —— Linaro 工具链为 x86-host 二进制，可在 x86 CI 直接运行。
+# 参考：https://github.com/dragonflylee/trimui-port (Makefile.tg5040 / port.yaml)
+# ---------------------------------------------------------------------------
+build_tg5040() {
+  local TRIMUI="/opt/trimui"
+  local SYSROOT="$TRIMUI/sysroot"
+  local PREFIX="$SYSROOT/usr"
+  local TMPDIR; TMPDIR="$(mktemp -d)"
+  local WILIWILI_SRC="$SRC"          # wiliwili 源码（由 build.yml clone 至 SOURCE_DIR）
+  local REPO_ROOT; REPO_ROOT="$(cd "$RECIPE_DIR/../../.." && pwd)"
+
+  echo "=== [tg5040] TrimUi TG5040 / PowerVR GE8300 交叉构建 ==="
+
+  # 0) 安装交叉构建主机侧工具（Linaro 工具链自身从官方 release 下载）
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    meson ninja-build cmake pkg-config wget ca-certificates xz-utils \
+    bzip2 patch python3
+
+  # 1) 下载并解包官方 trimui SDK（工具链 + sysroot，含 PowerVR GE8300 头文件/库）
+  #    https://github.com/trimui/toolchain_sdk_smartpro/releases/tag/20231018
+  rm -rf "$TRIMUI"
+  mkdir -p "$TRIMUI"
+  wget -q "https://github.com/trimui/toolchain_sdk_smartpro/releases/download/20231018/aarch64-linux-gnu-7.5.0-linaro.tgz" -O "$TMPDIR/linaro.tgz"
+  tar zxf "$TMPDIR/linaro.tgz" -C "$TRIMUI" --strip-components=1
+  mv "$TRIMUI/aarch64-linux-gnu/libc" "$SYSROOT"
+  wget -q "https://github.com/trimui/toolchain_sdk_smartpro/releases/download/20231018/SDK_usr_tg5040_a133p.tgz" -O "$TMPDIR/sdk.tgz"
+  tar zxf "$TMPDIR/sdk.tgz" -C "$SYSROOT"
+
+  # 2) 依赖源码（curl/libwebp/harfbuzz/fribidi/libass/libdrm/v4l-utils/ffmpeg/mpv）
+  wget -qO- https://curl.se/download/curl-8.14.1.tar.xz | tar Jxf - -C "$TMPDIR"
+  wget -qO- https://github.com/webmproject/libwebp/archive/v1.4.0.tar.gz | tar zxf - -C "$TMPDIR"
+  wget -qO- https://github.com/harfbuzz/harfbuzz/releases/download/7.3.0/harfbuzz-7.3.0.tar.xz | tar Jxf - -C "$TMPDIR"
+  wget -qO- https://github.com/fribidi/fribidi/releases/download/v1.0.16/fribidi-1.0.16.tar.xz | tar Jxf - -C "$TMPDIR"
+  wget -qO- https://github.com/libass/libass/releases/download/0.17.4/libass-0.17.4.tar.xz | tar Jxf - -C "$TMPDIR"
+  wget -qO- https://dri.freedesktop.org/libdrm/libdrm-2.4.120.tar.xz | tar Jxf - -C "$TMPDIR"
+  wget -qO- https://linuxtv.org/downloads/v4l-utils/v4l-utils-1.24.1.tar.bz2 | tar jxf - -C "$TMPDIR"
+  wget -qO- https://ffmpeg.org/releases/ffmpeg-6.1.1.tar.xz | tar Jxf - -C "$TMPDIR"
+  wget -qO- https://github.com/mpv-player/mpv/archive/v0.36.0.tar.gz | tar zxf - -C "$TMPDIR"
+  patch -d "$TMPDIR/ffmpeg-6.1.1" -Nbp1 -i "$RECIPE_DIR/patches/ffmpeg-v4l2-request.patch"
+  patch -d "$TMPDIR/mpv-0.36.0" -Nbp1 -i "$RECIPE_DIR/patches/mpv-v4l2-request.patch"
+
+  export PATH="$SYSROOT/bin:$TRIMUI/bin:$PATH"
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+  export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
+  export LD_LIBRARY_PATH="$PREFIX/lib"
+
+  # 3) SDL2 — PowerVR GE8300 适配版（仓库随附 SDL2-2.26.1.GE8300.tgz）
+  tar zxf "$RECIPE_DIR/SDL2-2.26.1.GE8300.tgz" -C "$TMPDIR"
+  ( cd "$TMPDIR/SDL2-2.26.1" && \
+    ./configure --host=aarch64-linux-gnu --prefix=/usr --with-sysroot="$SYSROOT" \
+      --disable-video-wayland --disable-pulseaudio && \
+    make -j"$(nproc)" && make DESTDIR="$SYSROOT" install )
+
+  # 4) curl（静态）
+  cmake -B "$TMPDIR/build/curl" -G Ninja -S "$TMPDIR/curl-8.14.1" \
+    -DCMAKE_TOOLCHAIN_FILE="$RECIPE_DIR/trimui.cmake" \
+    -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF -DCURL_USE_OPENSSL=ON \
+    -DCURL_CA_BUNDLE=resources/cacert.pem -DHTTP_ONLY=ON \
+    -DCURL_DISABLE_PROGRESS_METER=ON -DBUILD_CURL_EXE=OFF \
+    -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DBUILD_LIBCURL_DOCS=OFF \
+    -DUSE_NGHTTP2=OFF -DUSE_LIBIDN2=OFF -DCURL_BROTLI=OFF -DCURL_ZSTD=OFF \
+    -DCURL_USE_LIBSSH2=OFF -DCURL_USE_LIBPSL=OFF
+  cmake --build "$TMPDIR/build/curl"
+  DESTDIR="$SYSROOT" cmake --install "$TMPDIR/build/curl"
+
+  # 5) libwebp（静态）
+  cmake -B "$TMPDIR/build/libwebp" -G Ninja -S "$TMPDIR/libwebp-1.4.0" \
+    -DCMAKE_TOOLCHAIN_FILE="$RECIPE_DIR/trimui.cmake" \
+    -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF -DWEBP_BUILD_EXTRAS=OFF -DWEBP_BUILD_ANIM_UTILS=OFF \
+    -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF \
+    -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF \
+    -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_LIBWEBPMUX=OFF
+  cmake --build "$TMPDIR/build/libwebp"
+  DESTDIR="$SYSROOT" cmake --install "$TMPDIR/build/libwebp"
+
+  # 6) harfbuzz / fribidi / libass（字幕链）
+  meson setup "$TMPDIR/build/harfbuzz" "$TMPDIR/harfbuzz-7.3.0" --cross-file="$RECIPE_DIR/trimui.ini" \
+    -Dfreetype=enabled -Dgobject=disabled -Dcairo=disabled -Dchafa=disabled \
+    -Dtests=disabled -Dintrospection=disabled -Ddocs=disabled -Ddoc_tests=false -Dutilities=disabled
+  meson compile -C "$TMPDIR/build/harfbuzz"
+  meson install -C "$TMPDIR/build/harfbuzz" --destdir="$SYSROOT"
+
+  meson setup "$TMPDIR/build/fribidi" "$TMPDIR/fribidi-1.0.16" --cross-file="$RECIPE_DIR/trimui.ini" \
+    -Dbin=false -Ddocs=false -Dtests=false
+  meson compile -C "$TMPDIR/build/fribidi"
+  meson install -C "$TMPDIR/build/fribidi" --destdir="$SYSROOT"
+
+  meson setup "$TMPDIR/build/libass" "$TMPDIR/libass-0.17.4" --cross-file="$RECIPE_DIR/trimui.ini"
+  meson compile -C "$TMPDIR/build/libass"
+  meson install -C "$TMPDIR/build/libass" --destdir="$SYSROOT"
+
+  # 7) libdrm（VPU 解码依赖，静态）
+  meson setup "$TMPDIR/build/libdrm" "$TMPDIR/libdrm-2.4.120" --cross-file="$RECIPE_DIR/trimui.ini" \
+    --default-library=static -Dcairo-tests=disabled -Dtests=false
+  meson compile -C "$TMPDIR/build/libdrm"
+  meson install -C "$TMPDIR/build/libdrm" --destdir="$SYSROOT"
+
+  # 8) ffmpeg 6.1.1（静态 + VPU 硬件解码 v4l2_m2m/request）
+  mkdir -p "$TMPDIR/build/ffmpeg"
+  ( cd "$TMPDIR/build/ffmpeg" && \
+    "$TMPDIR/ffmpeg-6.1.1/configure" --prefix=/usr --disable-shared --enable-static \
+      --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --pkg-config=pkg-config \
+      --arch=aarch64 --cpu=cortex-a53 --target-os=linux --enable-pic --enable-neon \
+      --extra-cflags="-I$TMPDIR/v4l-utils-1.24.1/include -I$RECIPE_DIR/include -I$PREFIX/include" \
+      --extra-ldflags="-L$PREFIX/lib" --sysroot="$SYSROOT" \
+      --disable-runtime-cpudetect --disable-programs --disable-debug --disable-avdevice \
+      --enable-nonfree --enable-openssl --disable-doc --enable-zlib --enable-libass \
+      --enable-libdrm --enable-libv4l2 --enable-v4l2_m2m --enable-libudev --enable-v4l2-request \
+      --disable-protocols --enable-protocol=file,http,tcp,udp,hls,https,tls,httpproxy \
+      --disable-filters --enable-filter=hflip,vflip,transpose \
+      --disable-muxers --disable-encoders --enable-encoder=png )
+  make -C "$TMPDIR/build/ffmpeg" -j"$(nproc)"
+  make -C "$TMPDIR/build/ffmpeg" DESTDIR="$SYSROOT" install
+
+  # 9) mpv 0.36（静态 libmpv + VPU）
+  meson setup "$TMPDIR/build/mpv" "$TMPDIR/mpv-0.36.0" --cross-file="$RECIPE_DIR/trimui.ini" \
+    --default-library=static -Dlibmpv=true -Dcplayer=false -Dtests=false \
+    -Dlua=disabled -Dlibarchive=disabled -Dsdl2=enabled -Dv4l2request=enabled
+  meson compile -C "$TMPDIR/build/mpv"
+  meson install -C "$TMPDIR/build/mpv" --destdir="$SYSROOT"
+
+  # 10) wiliwili
+  cmake -B "$TMPDIR/build/wiliwili" -G Ninja -S "$WILIWILI_SRC" \
+    -DCMAKE_TOOLCHAIN_FILE="$RECIPE_DIR/trimui.cmake" \
+    -DCMAKE_MODULE_PATH="$RECIPE_DIR/cmake" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPLATFORM_DESKTOP=ON \
+    -DCMAKE_CXX_FLAGS="-DTRIMUI" \
+    -DUSE_SYSTEM_CURL=ON \
+    -DUSE_SYSTEM_SDL2=ON \
+    -DMPV_NO_FB=ON \
+    -DUSE_SDL2=ON \
+    -DUSE_GLES3=ON
+  cmake --build "$TMPDIR/build/wiliwili"
+
+  # 11) 收集产物 + 打包运行时依赖
+  mkdir -p dist/libs
+  cp "$TMPDIR/build/wiliwili/wiliwili" dist/wiliwili
+  strip dist/wiliwili || true
+  cp -r "$WILIWILI_SRC/resources" dist/resources
+
+  # 仅打包随附的 libSDL2（GE8300 版，遮蔽厂商 mali SDL2）；PowerVR EGL/GLES 交还设备 DDK
+  is_core_tg5040() {
+    case "$(basename "$1")" in
+      libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libgcc_s.so*|\
+      libstdc++.so*|ld-linux-*|linux-vdso.so*|libutil.so*|libresolv.so*|\
+      libBrokenLocale.so*|libmvec.so*|libnsl.so*|libpcprofile.so*|\
+      libEGL.so*|libGLESv2.so*|libGLESv1_CM.so*|libgbm.so*|\
+      libsrv_um.so*|libpvrNULL_WSEGL.so*|libPVR*.so*|libIMG*.so*|\
+      libasound.so*|libz.so*|libexpat.so*|libfreetype.so*|\
+      libglib-2.0.so*|libgobject-2.0.so*|libgmodule-2.0.so*|\
+      libpng16.so*|libjpeg.so*|libharfbuzz.so*|libfribidi.so*|\
+      libass.so*|libfontconfig.so*) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  local DEST="dist/libs"
+  stage_lib_tg5040() {
+    local src="$1" soname; soname="$(basename "$src")"
+    is_core_tg5040 "$soname" && return 0
+    [ -e "$DEST/$soname" ] && return 0
+    cp -L "$src" "$DEST/$soname" 2>/dev/null || { echo "WARN: 无法拷贝 $src" >&2; return 1; }
+    return 0
+  }
+  scan_deps_tg5040() {
+    local obj="$1" soname target
+    while IFS= read -r line; do
+      soname="$(printf '%s' "$line" | awk '{print $1}')"
+      target="$(printf '%s' "$line" | awk '{print $3}')"
+      [ -z "$soname" ] && continue
+      [ "$soname" = "linux-vdso.so.1" ] && continue
+      is_core_tg5040 "$soname" && continue
+      [ -z "$target" ] && target="$(ldconfig -p 2>/dev/null | awk -v s="$soname" '$1==s {print $NF; exit}')"
+      [ -z "$target" ] && for d in "$SYSROOT/usr/lib" "$SYSROOT/lib"; do
+        [ -e "$d/$soname" ] && { target="$d/$soname"; break; }
+      done
+      [ -z "$target" ] && { echo "WARN: 无法定位 $soname" >&2; continue; }
+      stage_lib_tg5040 "$target"
+    done < <(ldd "$obj" 2>/dev/null)
+  }
+  stage_lib_tg5040 "$SYSROOT/usr/lib/libSDL2-2.0.so.0"
+  scan_deps_tg5040 "dist/wiliwili"
+  scan_deps_tg5040 "$DEST/libSDL2-2.0.so.0"
+
+  cd "$REPO_ROOT"
+  tar -czf "wiliwili-linux-${ARCH}.tar.gz" -C "$SRC/dist" .
+  echo "=== done: wiliwili-linux-${ARCH}.tar.gz ==="
+}
+
+# === TARGET 路由分发 ===
+TARGET="${TARGET:-rocknix}"
+if [ "$TARGET" = "tg5040" ]; then
+  build_tg5040
+  exit 0
+fi
+
 # 修复容器挂载导致的 git "dubious ownership"（宿主 uid ≠ 容器内 git 用户 uid）
 # 主仓库及可能的 submodule 工作树均由宿主 runner uid 拥有，挂载进容器后
 # 容器内 git 用户（多为 root）uid 与之不同，首次 git 操作即报此错。

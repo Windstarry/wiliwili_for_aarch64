@@ -18,12 +18,6 @@ fi
 # 3. 设置运行时库搜索路径（libs 与 libs.aarch64 都尝试，对 libmpv 版本无关）
 export LD_LIBRARY_PATH="$BIN_DIR/libs:$BIN_DIR/libs.aarch64:$LD_LIBRARY_PATH"
 
-# 让自打包的 Mesa（libs/ 中的 libEGL/libGL 等）使用系统 DRI 驱动
-# 系统 /usr/lib/dri 提供 rockchip_dri.so / panfrost_dri.so / kms_swrast_dri.so 等；
-# 自打包 Mesa 不含 DRI 驱动，必须指向系统路径 EGL 才能创建渲染面（否则无图像）。
-# export LIBGL_DRIVERS_PATH="/usr/lib/dri"
-# export MESA_DRIVERS_PATH="/usr/lib/dri"
-
 # 4. 切换到二进制目录
 cd "$BIN_DIR"
 

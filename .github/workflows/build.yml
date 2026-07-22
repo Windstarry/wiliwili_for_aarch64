@@ -10,34 +10,26 @@ on:
 permissions:
   contents: write
 env:
-  IMAGE: ghcr.io/monkeyx-net/portmaster-build-templates/portmaster-builder:aarch64-latest
   # 源码仓库：默认拉取 wiliwili 源码（含子模块）。
   WILIWILI_REPO: https://github.com/Windstarry/wiliwili.git
-  # 源码版本：默认 master。可指定 tag / commit / 分支名，例如 v1.4.0 或 a1b2c3d
+  # 源码版本：默认 yoga 分支。
   WILIWILI_REF: yoga
-  # 纯系统 GL 路线（默认开启源码构建）：apt 的 libmpv-dev 0.32 会硬链桌面 libGL，
-  # 而系统 libGL 损坏（file too short）、打包 Mesa libGL 又会预 main 挂起（H1）。故默认
-  # 开启 BUILD_MPV_FROM_SRC，从源码构建 mpv( gl=enabled plain-gl=enabled egl=disabled ) + ffmpeg
-  # ( --disable-opengl )，产出 EGL-only、无 libGL 依赖的 libmpv/libavdevice，与 wiliwili160
-  # 纯系统 GL 路线对齐。设为空/false 则回退 apt 旧路径（MISSING 校验会拒绝残包）。
-  BUILD_MPV_FROM_SRC: 'on'
+  # 交叉构建目标：tg5040 = TrimUi TG5040 / Allwinner A133P + PowerVR GE8300
+  #   （由 recipes/ports/wiliwili/build.sh 读取 TARGET 分发到 build_tg5040 路径）
+  TARGET: tg5040
 jobs:
   build:
     name: Build & Package PortMaster
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout (port repo)
         uses: actions/checkout@v4
       - name: Clone wiliwili source (with submodules)
         run: |
-          git clone --recursive "$WILIWILI_REPO" src
-      - name: Build in container
+          git clone --recursive --branch "$WILIWILI_REF" "$WILIWILI_REPO" src
+      - name: Cross-build (tg5040 / PowerVR GE8300)
         run: |
-          docker run --rm -v "$PWD":/workspace -w /workspace \
-            -e DEBIAN_FRONTEND=noninteractive -e SOURCE_DIR=/workspace/src \
-            -e WILIWILI_REF="$WILIWILI_REF" \
-            -e BUILD_MPV_FROM_SRC="$BUILD_MPV_FROM_SRC" \
-            ${{ env.IMAGE }} /bin/bash -c "bash recipes/ports/wiliwili/build.sh aarch64"
+          TARGET=tg5040 SOURCE_DIR="$PWD/src" bash recipes/ports/wiliwili/build.sh aarch64
       - name: Assemble PortMaster port
         run: |
           # 目录结构：wiliwili-portmaster/  (zip 根)
