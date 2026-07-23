@@ -2,6 +2,9 @@
 set -euo pipefail
 ARCH="${1:-aarch64}"
 SRC="${SOURCE_DIR:-.}"
+# 必须在 cd "$SRC" 之前固定脚本目录：CI 中 SOURCE_DIR 指向 wiliwili 源码子目录，
+# 一旦进入该目录，相对 $0 (recipes/ports/wiliwili) 将解析失败导致本行 cd 报错。
+RECIPE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 echo "=== wiliwili ${ARCH} build (arch=${ARCH}, src=${SRC}) ==="
 cd "$SRC"
 
@@ -12,8 +15,6 @@ cd "$SRC"
 # 注意：build_tg5040 在 ubuntu-latest runner 直接运行（无 docker、无 /workspace 挂载），
 # 其产物 tar 包以相对名 wiliwili-linux-${ARCH}.tar.gz 落到仓库根目录，供下方 Assemble 步骤解包。
 # ---------------------------------------------------------------------------
-RECIPE_DIR="$(cd "$(dirname "$0")" && pwd)"
-
 # ---------------------------------------------------------------------------
 # TrimUi TG5040 (Allwinner A133P + PowerVR GE8300) 交叉构建路径
 # 背景：目标机 TinaLinux + PowerVR GE8300，厂商 SDL2 的 mali 视频后端与 PowerVR
