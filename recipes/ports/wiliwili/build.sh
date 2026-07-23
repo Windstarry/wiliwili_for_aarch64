@@ -175,6 +175,9 @@ build_tg5040() {
   cp "$TMPDIR/build/wiliwili/wiliwili" dist/wiliwili
   strip dist/wiliwili || true
   cp -r "$WILIWILI_SRC/resources" dist/resources
+  # 字体替换（对齐上游 Makefile.tg5040 的 wiliwili 目标）：用 TrimUi 适配字体覆盖默认图标字体，移除无关 keymap 字体
+  rm -f dist/resources/font/keymap_*.ttf
+  cp -f "$RECIPE_DIR/trimui.ttf" dist/resources/font/switch_icons.ttf
 
   # 仅打包随附的 libSDL2（GE8300 版，遮蔽厂商 mali SDL2）；PowerVR EGL/GLES 交还设备 DDK
   is_core_tg5040() {
