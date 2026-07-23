@@ -46,6 +46,11 @@ build_tg5040() {
   wget -q "https://github.com/trimui/toolchain_sdk_smartpro/releases/download/20231018/aarch64-linux-gnu-7.5.0-linaro.tgz" -O "$TMPDIR/linaro.tgz"
   tar zxf "$TMPDIR/linaro.tgz" -C "$TRIMUI" --strip-components=1
   mv "$TRIMUI/aarch64-linux-gnu/libc" "$SYSROOT"
+  # 恢复 Linaro gcc 内建 sysroot 路径：gcc 的 baked sysroot 指向 $TRIMUI/aarch64-linux-gnu/libc，
+  # 上一步 mv 后该路径消失；SDL2 的 autotools configure 不会把 --with-sysroot 传播到链接测试，
+  # 链接会用 gcc 内建 sysroot 找 crt1.o/libc -> 报 "C compiler cannot create executables"。
+  # 建符号链接让内建路径解析到 SYSROOT，与 cmake/meson 的 --sysroot 指向同一 libc 树。
+  ln -sfn "$SYSROOT" "$TRIMUI/aarch64-linux-gnu/libc"
   wget -q "https://github.com/trimui/toolchain_sdk_smartpro/releases/download/20231018/SDK_usr_tg5040_a133p.tgz" -O "$TMPDIR/sdk.tgz"
   tar zxf "$TMPDIR/sdk.tgz" -C "$SYSROOT"
 
