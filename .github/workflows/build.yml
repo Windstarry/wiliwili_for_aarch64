@@ -43,19 +43,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Clone wiliwili source (rocknix)
-        if: github.event.inputs.target == 'both' || github.event.inputs.target == 'rocknix'
+        if: matrix.target == 'rocknix'
         run: |
           git clone --recursive "$WILIWILI_REPO" src
 
       - name: Clone wiliwili source (tg5040)
-        if: github.event.inputs.target == 'both' || github.event.inputs.target == 'tg5040'
+        if: matrix.target == 'tg5040'
         run: |
           git clone --recursive "$WILIWILI_REPO" src && \
           git -C src checkout "$WILIWILI_REF_TG5040" && \
           git -C src submodule update --init --recursive
 
       - name: Build in container (rocknix / Mali-G31)
-        if: github.event.inputs.target == 'both' || github.event.inputs.target == 'rocknix'
+        if: matrix.target == 'rocknix'
         run: |
           docker run --rm -v "$PWD":/workspace -w /workspace \
             -e DEBIAN_FRONTEND=noninteractive -e SOURCE_DIR=/workspace/src \
@@ -64,12 +64,12 @@ jobs:
             ${{ env.IMAGE }} /bin/bash -c "bash recipes/ports/wiliwili/build.sh aarch64"
 
       - name: Cross-build (tg5040 / PowerVR GE8300)
-        if: github.event.inputs.target == 'both' || github.event.inputs.target == 'tg5040'
+        if: matrix.target == 'tg5040'
         run: |
           sudo env TARGET=tg5040 SOURCE_DIR="$PWD/src" bash recipes/ports/wiliwili/build.sh aarch64
 
       - name: Assemble PortMaster port (tg5040 / TrimUi flat layout)
-        if: github.event.inputs.target == 'both' || github.event.inputs.target == 'tg5040'
+        if: matrix.target == 'tg5040'
         run: |
           rm -rf ports
           mkdir -p ports/wiliwili
@@ -84,7 +84,7 @@ jobs:
           cd ports/wiliwili && zip -r ../../wiliwili-${{ matrix.target }}.zip .
 
       - name: Assemble PortMaster port (rocknix / nested layout)
-        if: github.event.inputs.target == 'both' || github.event.inputs.target == 'rocknix'
+        if: matrix.target == 'rocknix'
         run: |
           rm -rf ports
           mkdir -p ports/wiliwili/wiliwili
