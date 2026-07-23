@@ -151,7 +151,8 @@ build_tg5040() {
   meson setup "$TMPDIR/build/mpv" "$TMPDIR/mpv-0.36.0" --cross-file="$RECIPE_DIR/trimui.ini" \
     --default-library=static -Dlibmpv=true -Dcplayer=false -Dtests=false \
     -Dlua=disabled -Dlibarchive=disabled -Dsdl2=enabled -Dv4l2request=enabled \
-    -Dgl=enabled -Dplain-gl=enabled -Degl=disabled -Dx11=disabled -Dwayland=disabled -Dcaca=disabled -Ddrm=disabled
+    -Dgl=enabled -Dplain-gl=enabled -Degl=disabled -Dx11=disabled -Dwayland=disabled -Dcaca=disabled
+  # 不能 -Ddrm=disabled：v4l2request hwdec 的符号定义在 hwdec_drmprime.c（挂在 drm 特性后编译），关 drm 会让其缺失导致链接 undefined reference；DRM/libdrm 与 GLVND 无关，保留安全。
   meson compile -C "$TMPDIR/build/mpv"
   meson install -C "$TMPDIR/build/mpv" --destdir="$SYSROOT"
 
