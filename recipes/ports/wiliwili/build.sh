@@ -137,9 +137,15 @@ build_tg5040() {
   make -C "$TMPDIR/build/ffmpeg" DESTDIR="$SYSROOT" install
 
   # 9) mpv 0.36（静态 libmpv + VPU）
+  #    GL 渲染后端须显式 -Dplain-gl=enabled：否则 libmpv 渲染 API（mpv_render_context_create）
+  #    未编入，点设置触发视频渲染上下文初始化时抛 failed to initialize mpv GL context -> abort。
+  #    对齐 main 62e44a6 修复。PowerVR GE8300 为 GLES-only，wiliwili 以 HOST-CONTEXT 模式把自身
+  #    GLES 上下文交给 mpv 渲染；刻意 -Degl=disabled 避免 mpv 硬链 libEGL -> libGLdispatch.so.0
+  #    （GLES-only 固件无该库，运行期加载失败）。plain-gl 仅开渲染器特性、不拉桌面 libGL。
   meson setup "$TMPDIR/build/mpv" "$TMPDIR/mpv-0.36.0" --cross-file="$RECIPE_DIR/trimui.ini" \
     --default-library=static -Dlibmpv=true -Dcplayer=false -Dtests=false \
-    -Dlua=disabled -Dlibarchive=disabled -Dsdl2=enabled -Dv4l2request=enabled
+    -Dlua=disabled -Dlibarchive=disabled -Dsdl2=enabled -Dv4l2request=enabled \
+    -Dgl=enabled -Dplain-gl=enabled -Degl=disabled -Dx11=disabled -Dwayland=disabled -Dcaca=disabled -Ddrm=disabled
   meson compile -C "$TMPDIR/build/mpv"
   meson install -C "$TMPDIR/build/mpv" --destdir="$SYSROOT"
 
