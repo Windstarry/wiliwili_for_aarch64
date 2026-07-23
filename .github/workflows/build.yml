@@ -35,43 +35,20 @@ jobs:
           sudo env TARGET=tg5040 SOURCE_DIR="$PWD/src" bash recipes/ports/wiliwili/build.sh aarch64
       - name: Assemble PortMaster port
         run: |
-          if [ "${TARGET}" = "tg5040" ]; then
-            # TrimUi / 吹米 扁平布局端口：
-            #   ports/wiliwili/            (zip 根，端口根目录)
-            #     ├── wiliwili             (二进制)
-            #     ├── libs.aarch64/        (运行时库，吹米标准命名)
-            #     ├── libs/                (保留一份以兼容个别固件)
-            #     ├── resources/           (字体等)
-            #     ├── config.json          (吹米端口清单)
-            #     ├── icon.png             (图标)
-            #     └── launch.sh            (启动器)
-            rm -rf ports && mkdir -p ports/wiliwili
-            tar -xzf wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/
-            mv ports/wiliwili/libs ports/wiliwili/libs.aarch64
-            # 同时保留 libs 目录以兼容个别固件（保守做法）
-            cp -r ports/wiliwili/libs.aarch64 ports/wiliwili/libs
-            cp recipes/ports/wiliwili/config.json ports/wiliwili/config.json
-            cp recipes/ports/wiliwili/icon.png ports/wiliwili/icon.png
-            cp recipes/ports/wiliwili/launch.sh ports/wiliwili/launch.sh
-            chmod +x ports/wiliwili/launch.sh
-            cd ports/wiliwili && zip -r ../../wiliwili.zip .
-          else
-            # RockNIX 嵌套布局端口（保留原逻辑）：
-            #   ports/wiliwili/            (zip 根)
-            #     ├── wiliwili.sh          (启动器，置于内层 wiliwili/ 之外)
-            #     └── wiliwili/            (内层目录)
-            #         ├── wiliwili         (二进制)
-            #         ├── libs/            (运行时库)
-            #         ├── port.json
-            #         └── wiliwili.png     (图标，置于内层 wiliwili/ 之内)
-            rm -rf ports && mkdir -p ports/wiliwili/wiliwili
-            tar -xzf wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/wiliwili/
-            cp recipes/ports/wiliwili/port.json ports/wiliwili/wiliwili/port.json
-            cp recipes/ports/wiliwili/wiliwili.sh ports/wiliwili/wiliwili.sh
-            cp recipes/ports/wiliwili/wiliwili.png ports/wiliwili/wiliwili/wiliwili.png
-            chmod +x ports/wiliwili/wiliwili.sh
-            cd ports/wiliwili && zip -r ../../wiliwili.zip .
-          fi
+          # 目录结构：wiliwili-portmaster/  (zip 根)
+          #   ├── wiliwili.sh          (启动器，置于内层 wiliwili/ 之外)
+          #   └── wiliwili/            (内层目录)
+          #       ├── wiliwili         (二进制)
+          #       ├── libs/            (运行时库)
+          #       ├── port.json
+          #       └── wiliwili.png     (图标，置于内层 wiliwili/ 之内)
+          mkdir -p ports/wiliwili/wiliwili
+          tar -xzf wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/wiliwili/
+          cp recipes/ports/wiliwili/port.json ports/wiliwili/wiliwili/port.json
+          cp recipes/ports/wiliwili/wiliwili.sh ports/wiliwili/wiliwili.sh
+          cp recipes/ports/wiliwili/wiliwili.png ports/wiliwili/wiliwili/wiliwili.png
+          chmod +x ports/wiliwili/wiliwili.sh
+          cd ports/wiliwili && zip -r ../../wiliwili.zip .
       - name: Upload portmaster artifact
         uses: actions/upload-artifact@v4
         with:
