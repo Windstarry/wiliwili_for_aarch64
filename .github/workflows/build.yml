@@ -1,47 +1,76 @@
 name: Build wiliwili (aarch64)
+
 on:
-  # 仅手动触发（Actions 页 Run workflow）。不再因每次 push 自动编译/发布。
   workflow_dispatch:
     inputs:
+      target:
+        description: 'Firmware target. rocknix = Mali-G31 (RockNIX); tg5040 = TrimUi TG5040 / PowerVR GE8300; both = build both.'
+        required: false
+        default: both
+        type: choice
+        options:
+          - both
+          - rocknix
+          - tg5040
       release_tag:
         description: 'Release tag/name, e.g. v1.0.0. Leave empty for a nightly prerelease.'
         required: false
         default: ''
+
 permissions:
   contents: write
+
 env:
-  # 源码仓库：默认拉取 wiliwili 源码（含子模块）。
   WILIWILI_REPO: https://github.com/Windstarry/wiliwili.git
-  # 源码版本：钉死到 v1.6.0 发布提交 88e5876bea9502d06f46a8656e3530684d3aaf7d（2026-04-25）。
-  #   浮动分支 yoga 可能解析到不一致的中间提交：cpp 已恒绑定 cell/windowFullscreen（init/hide 在
-  #   setting_activity.cpp 的 #ifdef ALLOW_FULLSCREEN 块内），但对应 xml 尚未含该 BooleanCell，
-  #   运行期 borealis 解析 XML 找不到视图 -> brls::ViewNotFoundException。钉死一致提交使构建可复现。
-  WILIWILI_REF: 88e5876bea9502d06f46a8656e3530684d3aaf7d
-  # 交叉构建目标：tg5040 = TrimUi TG5040 / Allwinner A133P + PowerVR GE8300
-  #   （由 recipes/ports/wiliwili/build.sh 读取 TARGET 分发到 build_tg5040 路径）
-  TARGET: tg5040
+  WILIWILI_REF: yoga
+  BUILD_MPV_FROM_SRC: 'on'
+  IMAGE: ghcr.io/monkeyx-net/portmaster-build-templates/portmaster-builder:aarch64-latest
+  WILIWILI_REF_TG5040: 88e5876bea9502d06f46a8656e3530684d3aaf7d
+
 jobs:
   build:
-    name: Build & Package PortMaster
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    if: github.event.inputs.target == 'both' || github.event.inputs.target == matrix.target
+    strategy:
+      matrix:
+        include:
+          - target: rocknix
+            runner: ubuntu-24.04-arm
+          - target: tg5040
+            runner: ubuntu-latest
     steps:
       - name: Checkout (port repo)
         uses: actions/checkout@v4
-      - name: Clone wiliwili source (with submodules)
+
+      - name: Clone wiliwili source (rocknix)
+        if: matrix.target == 'rocknix'
         run: |
-          git clone --recursive "$WILIWILI_REPO" src && git -C src checkout "$WILIWILI_REF" && git -C src submodule update --init --recursive
+          git clone --recursive "$WILIWILI_REPO" src
+
+      - name: Clone wiliwili source (tg5040)
+        if: matrix.target == 'tg5040'
+        run: |
+          git clone --recursive "$WILIWILI_REPO" src && \
+          git -C src checkout "$WILIWILI_REF_TG5040" && \
+          git -C src submodule update --init --recursive
+
+      - name: Build in container (rocknix / Mali-G31)
+        if: matrix.target == 'rocknix'
+        run: |
+          docker run --rm -v "$PWD":/workspace -w /workspace \
+            -e DEBIAN_FRONTEND=noninteractive -e SOURCE_DIR=/workspace/src \
+            -e WILIWILI_REF="$WILIWILI_REF" \
+            -e BUILD_MPV_FROM_SRC="$BUILD_MPV_FROM_SRC" \
+            ${{ env.IMAGE }} /bin/bash -c "bash recipes/ports/wiliwili/build.sh aarch64"
+
       - name: Cross-build (tg5040 / PowerVR GE8300)
+        if: matrix.target == 'tg5040'
         run: |
           sudo env TARGET=tg5040 SOURCE_DIR="$PWD/src" bash recipes/ports/wiliwili/build.sh aarch64
+
       - name: Assemble PortMaster port
         run: |
-          # 目录结构：wiliwili-portmaster/  (zip 根)
-          #   ├── wiliwili.sh          (启动器，置于内层 wiliwili/ 之外)
-          #   └── wiliwili/            (内层目录)
-          #       ├── wiliwili         (二进制)
-          #       ├── libs/            (运行时库)
-          #       ├── port.json
-          #       └── wiliwili.png     (图标，置于内层 wiliwili/ 之内)
           mkdir -p ports/wiliwili/wiliwili
           tar -xzf wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/wiliwili/
           cp recipes/ports/wiliwili/port.json ports/wiliwili/wiliwili/port.json
@@ -49,12 +78,14 @@ jobs:
           cp recipes/ports/wiliwili/wiliwili.png ports/wiliwili/wiliwili/wiliwili.png
           chmod +x ports/wiliwili/wiliwili.sh
           cd ports/wiliwili && zip -r ../../wiliwili.zip .
+
       - name: Upload portmaster artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wiliwili-portmaster
+          name: wiliwili-${{ matrix.target }}
           path: wiliwili.zip
           retention-days: 7
+
   release:
     name: Create Release
     runs-on: ubuntu-latest
@@ -64,13 +95,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: wiliwili-portmaster
+          pattern: wiliwili-*
           path: release
+          merge-multiple: true
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/wiliwili.zip
-          # 手动输入 release_tag -> 以该名为正式 Release；留空 -> 覆盖式 nightly prerelease
+          files: release/**
           tag_name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || 'nightly' }}
           name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || 'Nightly Build' }}
           prerelease: ${{ github.event.inputs.release_tag == '' }}
@@ -78,5 +109,6 @@ jobs:
           body: |
             Automated build from ${{ github.sha }}
             - Source ref: ${{ github.ref_name }}
+            - Target: ${{ github.event.inputs.target }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
