@@ -69,21 +69,38 @@ jobs:
         run: |
           sudo env TARGET=tg5040 SOURCE_DIR="$PWD/src" bash recipes/ports/wiliwili/build.sh aarch64
 
-      - name: Assemble PortMaster port
+      - name: Assemble PortMaster port (tg5040 / TrimUi flat layout)
+        if: matrix.target == 'tg5040'
         run: |
+          rm -rf ports
+          mkdir -p ports/wiliwili
+          tar -xzf wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/
+          mv ports/wiliwili/libs ports/wiliwili/libs.aarch64
+          # 保留一份 libs 以兼容个别固件
+          cp -r ports/wiliwili/libs.aarch64 ports/wiliwili/libs
+          cp recipes/ports/wiliwili/config.json ports/wiliwili/config.json
+          cp recipes/ports/wiliwili/icon.png ports/wiliwili/icon.png
+          cp recipes/ports/wiliwili/launch.sh ports/wiliwili/launch.sh
+          chmod +x ports/wiliwili/launch.sh
+          cd ports/wiliwili && zip -r ../../wiliwili-${{ matrix.target }}.zip .
+
+      - name: Assemble PortMaster port (rocknix / nested layout)
+        if: matrix.target == 'rocknix'
+        run: |
+          rm -rf ports
           mkdir -p ports/wiliwili/wiliwili
           tar -xzf wiliwili-linux-aarch64.tar.gz -C ports/wiliwili/wiliwili/
           cp recipes/ports/wiliwili/port.json ports/wiliwili/wiliwili/port.json
           cp recipes/ports/wiliwili/wiliwili.sh ports/wiliwili/wiliwili.sh
           cp recipes/ports/wiliwili/wiliwili.png ports/wiliwili/wiliwili/wiliwili.png
           chmod +x ports/wiliwili/wiliwili.sh
-          cd ports/wiliwili && zip -r ../../wiliwili.zip .
+          cd ports/wiliwili && zip -r ../../wiliwili-${{ matrix.target }}.zip .
 
       - name: Upload portmaster artifact
         uses: actions/upload-artifact@v4
         with:
           name: wiliwili-${{ matrix.target }}
-          path: wiliwili.zip
+          path: wiliwili-${{ matrix.target }}.zip
           retention-days: 7
 
   release:
