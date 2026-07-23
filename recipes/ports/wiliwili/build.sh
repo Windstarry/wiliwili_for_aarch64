@@ -587,7 +587,7 @@ is_core() {
     libwbclient.so*|libndr-krb5pac.so*|libndr-nbt.so*|libndr-standard.so*|\
     libtalloc.so*|libdcerpc-binding.so*|\
     libz.so*|libexpat.so*|libfreetype.so*|\
-    libfontconfig.so*|libpng16.so*|libjpeg.so*|liblcms2.so*|libgcrypt.so*|\
+    libfontconfig.so*|libpng16.so*|libjpeg.so*|libgcrypt.so*|\
     libgpg-error.so*|libgmp.so*|libgnutls.so*|libidn2.so*|libsqlite3.so*|\
     libsystemd.so*|libudev.so*|libusb-1.0.so*|libdbus-1.so*|libblkid.so*|\
     libmount.so*|libuuid.so*|libarchive.so*|libass.so*|libfribidi.so*|\
@@ -652,6 +652,27 @@ if [ "$has_mpv" -eq 0 ]; then
   else
     echo "ERROR: 构建机上找不到 libmpv，无法打包运行时依赖。" >&2
     exit 1
+  fi
+fi
+
+# 显式兜底：确保 liblcms2（版本无关，匹配 liblcms2.so.*）一定被打包
+# 背景：部分 RockNIX 固件系统缺失此颜色管理库，运行期报 "cannot open shared object file:
+# liblcms2.so.2"；已从 is_core 排除清单移除，但为防 ldd 经被排除的父库（如 libpng16）漏遍历到，
+# 此处强制补打包。liblcms2 非 GL/Mesa/GLVND 栈，打包不会触发纯系统 GL 路线守卫。
+has_lcms=0
+for f in "$DEST"/liblcms2.so.*; do
+  [ -e "$f" ] && { has_lcms=1; break; }
+done
+if [ "$has_lcms" -eq 0 ]; then
+  lcms="$(command -v ldconfig >/dev/null && ldconfig -p 2>/dev/null | awk '$1 ~ /^liblcms2\.so\./ {print $NF; exit}')"
+  [ -z "$lcms" ] && for d in /usr/lib/aarch64-linux-gnu /lib/aarch64-linux-gnu /usr/lib /lib; do
+    f="$(ls "$d"/liblcms2.so.* 2>/dev/null | head -n1)"
+    [ -n "$f" ] && { lcms="$f"; break; }
+  done
+  if [ -n "$lcms" ]; then
+    stage_lib "$lcms"
+  else
+    echo "WARN: 构建机上找不到 liblcms2，跳过兜底打包（运行期可能缺库）" >&2
   fi
 fi
 
