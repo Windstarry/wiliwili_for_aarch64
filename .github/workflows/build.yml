@@ -32,7 +32,7 @@ jobs:
           git clone --recursive "$WILIWILI_REPO" src && git -C src checkout "$WILIWILI_REF" && git -C src submodule update --init --recursive
       - name: Cross-build (tg5040 / PowerVR GE8300)
         run: |
-          TARGET=tg5040 SOURCE_DIR="$PWD/src" bash recipes/ports/wiliwili/build.sh aarch64
+          sudo env TARGET=tg5040 SOURCE_DIR="$PWD/src" bash recipes/ports/wiliwili/build.sh aarch64
       - name: Assemble PortMaster port
         run: |
           # 目录结构：wiliwili-portmaster/  (zip 根)
