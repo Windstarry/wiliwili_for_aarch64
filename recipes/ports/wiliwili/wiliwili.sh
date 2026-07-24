@@ -18,6 +18,10 @@ fi
 # 3. 设置运行时库搜索路径（libs 与 libs.aarch64 都尝试，对 libmpv 版本无关）
 export LD_LIBRARY_PATH="$BIN_DIR/libs:$BIN_DIR/libs.aarch64:$LD_LIBRARY_PATH"
 
+# ArkOS/RockNIX 手持机为 Mali + DRM 裸控制台：固定 kmsdrm 后端，
+# 避免 SDL 自动探测在无显示会话下选中 X11/Wayland 导致 "sdl: failed to create window"
+export SDL_VIDEODRIVER=kmsdrm
+
 # 4. 切换到二进制目录
 cd "$BIN_DIR"
 
