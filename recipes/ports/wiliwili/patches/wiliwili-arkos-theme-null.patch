@@ -12,8 +12,8 @@ index db97d64..1388188 100644
 +    // (addColor() accessing `this` at a non-zero offset) would segfault during startup.
 +    // Capture the pointer and bail out safely when it is NULL; the default theme still
 +    // renders. When the theme is valid this function behaves exactly as before.
-+    brls::Theme* lightTheme = &brls::Theme::getLightTheme();
-+    brls::Theme* darkTheme = &brls::Theme::getDarkTheme();
++    auto* lightTheme = &brls::Theme::getLightTheme();
++    auto* darkTheme = &brls::Theme::getDarkTheme();
 +    if (!lightTheme || !darkTheme) {
 +        brls::Logger::warning("Register::initCustomTheme: theme variant is null, skip custom register");
 +        return;
@@ -122,7 +122,7 @@ index db97d64..1388188 100644
 +    // Guard against a NULL style (same class of failure as the theme guard above).
 +    // Capture the pointer and bail out safely when it is NULL; the default style still
 +    // renders. When the style is valid this function behaves exactly as before.
-+    brls::Style* style = &brls::getStyle();
++    auto* style = &brls::getStyle();
 +    if (!style) {
 +        brls::Logger::warning("Register::initCustomStyle: style is null, skip custom register");
 +        return;
