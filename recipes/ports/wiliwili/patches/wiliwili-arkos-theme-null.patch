@@ -1,7 +1,7 @@
-diff --git a/source/utils/register_helper.cpp b/source/utils/register_helper.cpp
+diff --git a/wiliwili/source/utils/register_helper.cpp b/wiliwili/source/utils/register_helper.cpp
 index db97d64..1388188 100644
---- a/source/utils/register_helper.cpp
-+++ b/source/utils/register_helper.cpp
+--- a/wiliwili/source/utils/register_helper.cpp
++++ b/wiliwili/source/utils/register_helper.cpp
 @@ -119,34 +119,47 @@ void Register::initCustomView() {
  }
  
