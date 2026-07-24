@@ -1,0 +1,230 @@
+diff --git a/source/utils/register_helper.cpp b/source/utils/register_helper.cpp
+index db97d64..1388188 100644
+--- a/source/utils/register_helper.cpp
++++ b/source/utils/register_helper.cpp
+@@ -119,34 +119,47 @@ void Register::initCustomView() {
+ }
+ 
+ void Register::initCustomTheme() {
++    // Guard against a NULL theme variant. On some borealis builds (e.g. ArkOS /
++    // RK3566 Mali) LibraryViewsThemeVariantsWrapper::getTheme(LIGHT) can return NULL,
++    // which makes brls::Theme::getLightTheme() a NULL-bound reference. Dereferencing it
++    // (addColor() accessing `this` at a non-zero offset) would segfault during startup.
++    // Capture the pointer and bail out safely when it is NULL; the default theme still
++    // renders. When the theme is valid this function behaves exactly as before.
++    brls::Theme* lightTheme = &brls::Theme::getLightTheme();
++    brls::Theme* darkTheme = &brls::Theme::getDarkTheme();
++    if (!lightTheme || !darkTheme) {
++        brls::Logger::warning("Register::initCustomTheme: theme variant is null, skip custom register");
++        return;
++    }
++
+     // Add custom values to the theme
+     // 用于左侧边栏背景
+-    brls::Theme::getLightTheme().addColor("color/grey_1", nvgRGB(245, 246, 247));
+-    brls::Theme::getDarkTheme().addColor("color/grey_1", nvgRGB(51, 52, 53));
++    lightTheme->addColor("color/grey_1", nvgRGB(245, 246, 247));
++    darkTheme->addColor("color/grey_1", nvgRGB(51, 52, 53));
+ 
+     // 用于二级切换分栏的背景色（例：直播切换分区、每周必看切换周）
+-    brls::Theme::getLightTheme().addColor("color/grey_2", nvgRGB(245, 245, 245));
+-    brls::Theme::getDarkTheme().addColor("color/grey_2", nvgRGB(51, 53, 55));
++    lightTheme->addColor("color/grey_2", nvgRGB(245, 245, 245));
++    darkTheme->addColor("color/grey_2", nvgRGB(51, 53, 55));
+ 
+     // 用于骨架屏背景色
+-    brls::Theme::getLightTheme().addColor("color/grey_3", nvgRGBA(200, 200, 200, 16));
+-    brls::Theme::getDarkTheme().addColor("color/grey_3", nvgRGBA(160, 160, 160, 160));
++    lightTheme->addColor("color/grey_3", nvgRGBA(200, 200, 200, 16));
++    darkTheme->addColor("color/grey_3", nvgRGBA(160, 160, 160, 160));
+ 
+     // 用于历史记录右上角Badge的半透明背景
+-    brls::Theme::getLightTheme().addColor("color/grey_4", nvgRGBA(48, 48, 48, 160));
+-    brls::Theme::getDarkTheme().addColor("color/grey_4", nvgRGBA(48, 48, 48, 160));
++    lightTheme->addColor("color/grey_4", nvgRGBA(48, 48, 48, 160));
++    darkTheme->addColor("color/grey_4", nvgRGBA(48, 48, 48, 160));
+ 
+     // 深浅配色通用的灰色字体颜色
+-    brls::Theme::getLightTheme().addColor("font/grey", nvgRGB(148, 153, 160));
+-    brls::Theme::getDarkTheme().addColor("font/grey", nvgRGB(148, 153, 160));
++    lightTheme->addColor("font/grey", nvgRGB(148, 153, 160));
++    darkTheme->addColor("font/grey", nvgRGB(148, 153, 160));
+ 
+     // 入站必刷推荐原因背景色
+-    brls::Theme::getLightTheme().addColor("color/yellow_1", nvgRGB(253, 246, 230));
+-    brls::Theme::getDarkTheme().addColor("color/yellow_1", nvgRGB(46, 33, 17));
++    lightTheme->addColor("color/yellow_1", nvgRGB(253, 246, 230));
++    darkTheme->addColor("color/yellow_1", nvgRGB(46, 33, 17));
+ 
+     // 入站必刷推荐原因字体颜色
+-    brls::Theme::getLightTheme().addColor("font/yellow_1", nvgRGB(217, 118, 7));
+-    brls::Theme::getDarkTheme().addColor("font/yellow_1", nvgRGB(217, 118, 7));
++    lightTheme->addColor("font/yellow_1", nvgRGB(217, 118, 7));
++    darkTheme->addColor("font/yellow_1", nvgRGB(217, 118, 7));
+ 
+     // 粉色文字，bilibili主题色
+     // 用户可以通过在配置文件中设置 custom_theme_color (#RRGGBB 十六进制，例如 #FF6699) 来自定义主题色
+@@ -161,18 +174,18 @@ void Register::initCustomTheme() {
+         std::snprintf(buf, sizeof(buf), "#%02X%02X%02X", r, g, b);
+         customThemeColorHex = buf;
+     } else if (!customColor.empty()) {
+-        brls::Logger::error("Register::initCustomTheme: invalid custom_theme_color \"{}\"", customColor);
++        brls::Logger::warning("Register::initCustomTheme: invalid custom_theme_color \"{}\"", customColor);
+     }
+-    brls::Theme::getLightTheme().addColor("color/bilibili", biliColor);
+-    brls::Theme::getDarkTheme().addColor("color/bilibili", biliColor);
++    lightTheme->addColor("color/bilibili", biliColor);
++    darkTheme->addColor("color/bilibili", biliColor);
+ 
+     // 蓝色文字，用于链接文字颜色
+-    brls::Theme::getLightTheme().addColor("color/link", nvgRGB(102, 147, 182));
+-    brls::Theme::getDarkTheme().addColor("color/link", nvgRGB(102, 147, 182));
++    lightTheme->addColor("color/link", nvgRGB(102, 147, 182));
++    darkTheme->addColor("color/link", nvgRGB(102, 147, 182));
+ 
+     // 分割线颜色
+-    brls::Theme::getLightTheme().addColor("color/line", nvgRGB(208, 208, 208));
+-    brls::Theme::getDarkTheme().addColor("color/line", nvgRGB(100, 100, 100));
++    lightTheme->addColor("color/line", nvgRGB(208, 208, 208));
++    darkTheme->addColor("color/line", nvgRGB(100, 100, 100));
+ 
+     // 粉色背景，用于扁平TabBar背景色
+     // 由主题色推导：亮色 = 与白色混合约12%，暗色 = 与黑色混合约14%
+@@ -182,77 +195,86 @@ void Register::initCustomTheme() {
+         float lr = 0.88f + 0.12f * rf;
+         float lg = 0.88f + 0.12f * gf;
+         float lb = 0.88f + 0.12f * bf;
+-        brls::Theme::getLightTheme().addColor("color/pink_1", nvgRGBf(lr, lg, lb));
++        lightTheme->addColor("color/pink_1", nvgRGBf(lr, lg, lb));
+         // dark: lerp(black, primary, 0.14)
+-        brls::Theme::getDarkTheme().addColor("color/pink_1", nvgRGBf(0.14f * rf, 0.14f * gf, 0.14f * bf));
++        darkTheme->addColor("color/pink_1", nvgRGBf(0.14f * rf, 0.14f * gf, 0.14f * bf));
+     }
+ 
+     // 红色，用于提示小红点
+-    brls::Theme::getLightTheme().addColor("color/tip/red", nvgRGB(250, 88, 87));
+-    brls::Theme::getDarkTheme().addColor("color/tip/red", nvgRGB(211, 63, 64));
++    lightTheme->addColor("color/tip/red", nvgRGB(250, 88, 87));
++    darkTheme->addColor("color/tip/red", nvgRGB(211, 63, 64));
+ 
+-    brls::Theme::getLightTheme().addColor("color/white", nvgRGB(255, 255, 255));
+-    brls::Theme::getDarkTheme().addColor("color/white", nvgRGBA(255, 255, 255, 180));
++    lightTheme->addColor("color/white", nvgRGB(255, 255, 255));
++    darkTheme->addColor("color/white", nvgRGBA(255, 255, 255, 180));
+ 
+-    brls::Theme::getLightTheme().addColor("captioned_image/caption", nvgRGB(2, 176, 183));
+-    brls::Theme::getDarkTheme().addColor("captioned_image/caption", nvgRGB(51, 186, 227));
++    lightTheme->addColor("captioned_image/caption", nvgRGB(2, 176, 183));
++    darkTheme->addColor("captioned_image/caption", nvgRGB(51, 186, 227));
+ }
+ 
+ void Register::initCustomStyle() {
++    // Guard against a NULL style (same class of failure as the theme guard above).
++    // Capture the pointer and bail out safely when it is NULL; the default style still
++    // renders. When the style is valid this function behaves exactly as before.
++    brls::Style* style = &brls::getStyle();
++    if (!style) {
++        brls::Logger::warning("Register::initCustomStyle: style is null, skip custom register");
++        return;
++    }
++
+     // Add custom values to the style
+-    brls::getStyle().addMetric("brls/animations/highlight", 200);
+-    brls::getStyle().addMetric("wiliwili/window/width", brls::Application::ORIGINAL_WINDOW_WIDTH);
++    style->addMetric("brls/animations/highlight", 200);
++    style->addMetric("wiliwili/window/width", brls::Application::ORIGINAL_WINDOW_WIDTH);
+ 
+     if (brls::Application::ORIGINAL_WINDOW_HEIGHT == 544) {
+-        brls::getStyle().addMetric("wiliwili/grid/span/5", 4);
+-        brls::getStyle().addMetric("wiliwili/grid/span/4", 3);
+-        brls::getStyle().addMetric("wiliwili/grid/span/3", 2);
+-        brls::getStyle().addMetric("wiliwili/grid/span/2", 2);
+-        brls::getStyle().addMetric("wiliwili/player/width", 600);
+-        brls::getStyle().addMetric("wiliwili/player/bottom/font", 10);
+-        brls::getStyle().addMetric("wiliwili/comment/level/x", 30);
+-        brls::getStyle().addMetric("wiliwili/margin/20", 10);
+-        brls::getStyle().addMetric("wiliwili/about/qr", 150);
+-        brls::getStyle().addMetric("wiliwili/about/speech/width", 420);
+-        brls::getStyle().addMetric("wiliwili/about/speech/header", 495);
+-        brls::getStyle().addMetric("wiliwili/tab_frame/content_padding_top_bottom", 20);
+-        brls::getStyle().addMetric("wiliwili/mine/num", 18);
+-        brls::getStyle().addMetric("wiliwili/mine/type", 12);
+-        brls::getStyle().addMetric("wiliwili/setting/about/bottom", 0);
+-        brls::getStyle().addMetric("wiliwili/dynamic/video/card/padding", 10);
+-        brls::getStyle().addMetric("brls/tab_frame/content_padding_sides", 30);
++        style->addMetric("wiliwili/grid/span/5", 4);
++        style->addMetric("wiliwili/grid/span/4", 3);
++        style->addMetric("wiliwili/grid/span/3", 2);
++        style->addMetric("wiliwili/grid/span/2", 2);
++        style->addMetric("wiliwili/player/width", 600);
++        style->addMetric("wiliwili/player/bottom/font", 10);
++        style->addMetric("wiliwili/comment/level/x", 30);
++        style->addMetric("wiliwili/margin/20", 10);
++        style->addMetric("wiliwili/about/qr", 150);
++        style->addMetric("wiliwili/about/speech/width", 420);
++        style->addMetric("wiliwili/about/speech/header", 495);
++        style->addMetric("wiliwili/tab_frame/content_padding_top_bottom", 20);
++        style->addMetric("wiliwili/mine/num", 18);
++        style->addMetric("wiliwili/mine/type", 12);
++        style->addMetric("wiliwili/setting/about/bottom", 0);
++        style->addMetric("wiliwili/dynamic/video/card/padding", 10);
++        style->addMetric("brls/tab_frame/content_padding_sides", 30);
+     } else {
+         switch (brls::Application::ORIGINAL_WINDOW_HEIGHT) {
+             case 1080:
+-                brls::getStyle().addMetric("wiliwili/grid/span/5", 7);
+-                brls::getStyle().addMetric("wiliwili/grid/span/4", 6);
+-                brls::getStyle().addMetric("wiliwili/grid/span/3", 5);
+-                brls::getStyle().addMetric("wiliwili/grid/span/2", 4);
++                style->addMetric("wiliwili/grid/span/5", 7);
++                style->addMetric("wiliwili/grid/span/4", 6);
++                style->addMetric("wiliwili/grid/span/3", 5);
++                style->addMetric("wiliwili/grid/span/2", 4);
+                 break;
+             case 900:
+-                brls::getStyle().addMetric("wiliwili/grid/span/5", 6);
+-                brls::getStyle().addMetric("wiliwili/grid/span/4", 5);
+-                brls::getStyle().addMetric("wiliwili/grid/span/3", 4);
+-                brls::getStyle().addMetric("wiliwili/grid/span/2", 3);
++                style->addMetric("wiliwili/grid/span/5", 6);
++                style->addMetric("wiliwili/grid/span/4", 5);
++                style->addMetric("wiliwili/grid/span/3", 4);
++                style->addMetric("wiliwili/grid/span/2", 3);
+                 break;
+             case 720:
+             default:
+-                brls::getStyle().addMetric("wiliwili/grid/span/5", 5);
+-                brls::getStyle().addMetric("wiliwili/grid/span/4", 4);
+-                brls::getStyle().addMetric("wiliwili/grid/span/3", 3);
+-                brls::getStyle().addMetric("wiliwili/grid/span/2", 2);
++                style->addMetric("wiliwili/grid/span/5", 5);
++                style->addMetric("wiliwili/grid/span/4", 4);
++                style->addMetric("wiliwili/grid/span/3", 3);
++                style->addMetric("wiliwili/grid/span/2", 2);
+         }
+-        brls::getStyle().addMetric("wiliwili/player/width", brls::Application::ORIGINAL_WINDOW_WIDTH - 480);
+-        brls::getStyle().addMetric("wiliwili/player/bottom/font", 13);
+-        brls::getStyle().addMetric("wiliwili/comment/level/x", 45);
+-        brls::getStyle().addMetric("wiliwili/margin/20", 20);
+-        brls::getStyle().addMetric("wiliwili/about/qr", 200);
+-        brls::getStyle().addMetric("wiliwili/about/speech/width", 660);
+-        brls::getStyle().addMetric("wiliwili/about/speech/header", 760);
+-        brls::getStyle().addMetric("wiliwili/tab_frame/content_padding_top_bottom", 42);
+-        brls::getStyle().addMetric("wiliwili/mine/num", 24);
+-        brls::getStyle().addMetric("wiliwili/mine/type", 16);
+-        brls::getStyle().addMetric("wiliwili/setting/about/bottom", 50);
+-        brls::getStyle().addMetric("wiliwili/dynamic/video/card/padding", 20);
++        style->addMetric("wiliwili/player/width", brls::Application::ORIGINAL_WINDOW_WIDTH - 480);
++        style->addMetric("wiliwili/player/bottom/font", 13);
++        style->addMetric("wiliwili/comment/level/x", 45);
++        style->addMetric("wiliwili/margin/20", 20);
++        style->addMetric("wiliwili/about/qr", 200);
++        style->addMetric("wiliwili/about/speech/width", 660);
++        style->addMetric("wiliwili/about/speech/header", 760);
++        style->addMetric("wiliwili/tab_frame/content_padding_top_bottom", 42);
++        style->addMetric("wiliwili/mine/num", 24);
++        style->addMetric("wiliwili/mine/type", 16);
++        style->addMetric("wiliwili/setting/about/bottom", 50);
++        style->addMetric("wiliwili/dynamic/video/card/padding", 20);
+     }
+ }

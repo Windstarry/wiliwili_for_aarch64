@@ -28,4 +28,8 @@ cd "$BIN_DIR"
 # 5. 记录运行日志，便于排错
 > "$BIN_DIR/log.txt" && exec > >(tee "$BIN_DIR/log.txt") 2>&1
 
+# Option C 兜底：显式给出主题变量，避免 borealis 在某些构建下未选择 LIGHT 变体
+# 导致 getTheme(LIGHT) 返回 NULL；若外部环境已设置 BOREALIS_THEME 则尊重之。
+export BOREALIS_THEME="${BOREALIS_THEME:-LIGHT}"
+
 ./wiliwili

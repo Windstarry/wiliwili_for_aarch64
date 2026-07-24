@@ -157,6 +157,12 @@ build_tg5040() {
   meson install -C "$TMPDIR/build/mpv" --destdir="$SYSROOT"
 
   # 10) wiliwili
+  # === 防御性补丁：NULL theme 守卫（修复 ArkOS / RK3566 Mali 启动 SIGSEGV）===
+  # 根因：本构建的 borealis 在启动早期 LibraryViewsThemeVariantsWrapper::getTheme(LIGHT)
+  # 可能返回 NULL，wiliwili 的 Register::initCustomTheme()/initCustomStyle() 直接解引用
+  # 该 NULL theme/style 的 this（+offset 9256）导致 SIGSEGV。补丁把 theme/style 返回值存为
+  # 局部指针并判空，为空时跳过自定义注册、不崩溃。须在 cmake 之前注入（-N 幂等）。
+  patch -d "$WILIWILI_SRC" -Nbp1 -i "$RECIPE_DIR/patches/wiliwili-arkos-theme-null.patch"
   cmake -B "$TMPDIR/build/wiliwili" -G Ninja -S "$WILIWILI_SRC" \
     -DCMAKE_TOOLCHAIN_FILE="$RECIPE_DIR/trimui.cmake" \
     -DCMAKE_MODULE_PATH="$RECIPE_DIR/cmake" \
@@ -466,6 +472,13 @@ fi
 # （A53/A55/A72 全兼容，绝不 SIGILL），-mtune=cortex-a53 仅做指令调度调优（不改 ISA）。
 # 多机型混合分发，故不用 -mcpu=cortex-a55（避免老 A53 设备非法指令崩溃）。LTO 关闭（轻量安全）。
 # 通过 cmake 命令行 -DCMAKE_C_FLAGS/-DCMAKE_CXX_FLAGS 注入（cmake 标准全局传参方式；wiliwili 为常规 CMake 项目、以追加式书写 CMAKE_CXX_FLAGS，本注入稳定生效，且高于 CXXFLAGS 环境变量优先级）。
+# === 防御性补丁：NULL theme 守卫（修复 ArkOS / RK3566 Mali 启动 SIGSEGV）===
+# 根因：本构建的 borealis 在启动早期 LibraryViewsThemeVariantsWrapper::getTheme(LIGHT)
+# 可能返回 NULL，wiliwili 的 Register::initCustomTheme()/initCustomStyle() 直接解引用
+# 该 NULL theme/style 的 this（+offset 9256）导致 SIGSEGV。补丁把 theme/style 返回值存为
+# 局部指针并判空，为空时跳过自定义注册、不崩溃。须在 cmake 之前注入（-N 幂等）。
+# 注：本路径（rocknix / Mali）才是 RK3566 Mali 设备实际走的分支；tg5040 路径已在上方同步注入。
+patch -d "$SRC" -Nbp1 -i "$RECIPE_DIR/patches/wiliwili-arkos-theme-null.patch"
 cmake -B build \
   -DPLATFORM_DESKTOP=ON \
   -DUSE_SDL2=ON \
